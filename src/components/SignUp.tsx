@@ -59,59 +59,52 @@ export function SignUp() {
       return;
     }
 
+    const parsedIncome = formData.income ? Number(formData.income) : undefined;
+    if (parsedIncome !== undefined && Number.isNaN(parsedIncome)) {
+      toast.error('Please enter a valid numeric value for income.');
+      return;
+    }
+
     setIsLoading(true);
-    
+
     try {
-      const fullName = `${formData.firstName} ${formData.lastName}`;
-      await signup(formData.email, formData.password, fullName, formData.phone, selectedRole);
-      
-      // If income information was provided for buyer/tenant, update the profile
-      if ((selectedRole === 'buyer' || selectedRole === 'tenant') && formData.income && parseFloat(formData.income) > 0) {
-        // The income will be saved via the signup function
-        const income = parseFloat(formData.income);
-        const incomeType = formData.incomeType;
-        const preferredPropertyType = formData.preferredPropertyType;
-        
-        // Store this in localStorage temporarily so it can be picked up by UserContext
-        const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-        const updatedUser = {
-          ...currentUser,
-          income,
-          incomeType,
-          preferredPropertyType
-        };
-        localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-        
-        // Also update in users array
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const userIndex = users.findIndex((u: any) => u.email === formData.email);
-        if (userIndex !== -1) {
-          users[userIndex] = { ...users[userIndex], income, incomeType, preferredPropertyType };
-          localStorage.setItem('users', JSON.stringify(users));
+      const { requiresVerification } = await signup({
+        email: formData.email,
+        password: formData.password,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        phone: formData.phone,
+        role: selectedRole,
+        income: parsedIncome,
+        incomeType: formData.incomeType,
+        preferredPropertyType: formData.preferredPropertyType,
+      });
+
+      if (requiresVerification) {
+        toast.success('Signup successful! Please check your email to verify your account before logging in.');
+        navigate('/login');
+      } else {
+        toast.success(`Account created successfully! Welcome to Find that Home.`);
+
+        switch (selectedRole) {
+          case 'tenant':
+            navigate('/profile');
+            break;
+          case 'landlord':
+            navigate('/landlord-dashboard');
+            break;
+          case 'buyer':
+            navigate('/profile');
+            break;
+          case 'agent':
+            navigate('/agent-dashboard');
+            break;
+          case 'admin':
+            navigate('/admin-dashboard');
+            break;
+          default:
+            navigate('/');
         }
-      }
-      
-      toast.success(`Account created successfully! Welcome to Find that Home.`);
-      
-      // Navigate based on role
-      switch (selectedRole) {
-        case 'tenant':
-          navigate('/profile');
-          break;
-        case 'landlord':
-          navigate('/landlord-dashboard');
-          break;
-        case 'buyer':
-          navigate('/profile');
-          break;
-        case 'agent':
-          navigate('/agent-dashboard');
-          break;
-        case 'admin':
-          navigate('/admin-dashboard');
-          break;
-        default:
-          navigate('/');
       }
     } catch (error: any) {
       const errorMessage = error.message || 'Sign up failed';

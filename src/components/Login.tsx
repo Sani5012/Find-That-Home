@@ -6,7 +6,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Separator } from './ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Home, Mail, Lock, Eye, EyeOff, Building2, ShoppingCart, UserCircle2, Briefcase, Shield, AlertCircle } from 'lucide-react';
+import { Home, Mail, Lock, Eye, EyeOff, Building2, ShoppingCart, UserCircle2, Briefcase, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { useUser, UserRole } from '../contexts/UserContext';
 import logoImage from 'figma:asset/fec5fc6ba55a6b0262eb857fb3a3dbd65968552b.png';
@@ -29,7 +29,6 @@ export function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedRole, setSelectedRole] = useState<UserRole>('tenant');
-  const [showWelcomeAdmin, setShowWelcomeAdmin] = useState(false);
   const [showPasswordError, setShowPasswordError] = useState(false);
   const [showUserNotFound, setShowUserNotFound] = useState(false);
 
@@ -44,30 +43,23 @@ export function Login() {
     setIsLoading(true);
     
     try {
-      await login(email, password, selectedRole);
-      
-      // After successful login, check if user is actually admin
-      const loggedInUserData = localStorage.getItem('currentUser');
-      const loggedInUser = loggedInUserData ? JSON.parse(loggedInUserData) : null;
-      
-      if (loggedInUser?.role === 'admin') {
-        setIsLoading(false);
-        setShowWelcomeAdmin(true);
+      const loggedInUser = await login(email, password, selectedRole);
+
+      if (loggedInUser.role === 'admin') {
+        toast.success('Welcome back, admin! Redirecting you to the control center.');
+        navigate('/admin-dashboard', { replace: true });
         return;
       }
-      
-      toast.success(`Welcome back! Logged in as ${selectedRole}`);
-      
-      // Navigate based on role
-      switch (selectedRole) {
+
+      toast.success(`Welcome back! Logged in as ${loggedInUser.role}`);
+
+      switch (loggedInUser.role) {
         case 'tenant':
+        case 'buyer':
           navigate('/profile');
           break;
         case 'landlord':
           navigate('/landlord-dashboard');
-          break;
-        case 'buyer':
-          navigate('/profile');
           break;
         case 'agent':
           navigate('/agent-dashboard');
@@ -328,31 +320,6 @@ export function Login() {
           </p>
         </div>
       </div>
-
-      {/* Welcome Admin Dialog */}
-      <AlertDialog open={showWelcomeAdmin} onOpenChange={setShowWelcomeAdmin}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <div className="flex items-center justify-center mb-4">
-              <div className="rounded-full bg-blue-100 p-3">
-                <Shield className="h-8 w-8 text-blue-600" />
-              </div>
-            </div>
-            <AlertDialogTitle className="text-center text-2xl">Welcome, Administrator!</AlertDialogTitle>
-            <AlertDialogDescription className="text-center">
-              You have successfully logged in to the admin panel. You now have full access to manage the Find that Home platform.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="sm:justify-center">
-            <AlertDialogAction onClick={() => {
-              setShowWelcomeAdmin(false);
-              navigate('/admin-dashboard');
-            }}>
-              Go to Admin Dashboard
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Password Error Dialog */}
       <AlertDialog open={showPasswordError} onOpenChange={setShowPasswordError}>

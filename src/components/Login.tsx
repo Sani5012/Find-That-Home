@@ -44,30 +44,23 @@ export function Login() {
     setIsLoading(true);
     
     try {
-      await login(email, password, selectedRole);
-      
-      // After successful login, check if user is actually admin
-      const loggedInUserData = localStorage.getItem('currentUser');
-      const loggedInUser = loggedInUserData ? JSON.parse(loggedInUserData) : null;
-      
-      if (loggedInUser?.role === 'admin') {
+      const loggedInUser = await login(email, password, selectedRole);
+
+      if (loggedInUser.role === 'admin') {
         setIsLoading(false);
         setShowWelcomeAdmin(true);
         return;
       }
-      
-      toast.success(`Welcome back! Logged in as ${selectedRole}`);
-      
-      // Navigate based on role
-      switch (selectedRole) {
+
+      toast.success(`Welcome back! Logged in as ${loggedInUser.role}`);
+
+      switch (loggedInUser.role) {
         case 'tenant':
+        case 'buyer':
           navigate('/profile');
           break;
         case 'landlord':
           navigate('/landlord-dashboard');
-          break;
-        case 'buyer':
-          navigate('/profile');
           break;
         case 'agent':
           navigate('/agent-dashboard');

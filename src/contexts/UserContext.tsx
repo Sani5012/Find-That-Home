@@ -1,138 +1,284 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import {
-  initializeStorage,
-  getUserByEmail,
-  createUser,
-  updateUser as updateUserInStorage,
-  User
-} from '../utils/localStorage';
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import type { User as SupabaseAuthUser, Session } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabaseClient';
+import { initializeStorage } from '../utils/localStorage';
 
 export type UserRole = 'tenant' | 'landlord' | 'buyer' | 'agent' | 'admin';
 
+export interface UserProfile {
+  id: string;
+  email: string;
+  role: UserRole;
+  name?: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  income?: number;
+  incomeType?: 'monthly' | 'yearly';
+  preferredPropertyType?: 'rent' | 'buy';
+  createdAt?: string;
+}
+
+export interface SignupPayload {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  role: UserRole;
+  income?: number;
+  incomeType?: 'monthly' | 'yearly';
+  preferredPropertyType?: 'rent' | 'buy';
+}
+
 interface UserContextType {
-  user: User | null;
-  login: (email: string, password: string, role: UserRole) => Promise<void>;
-  signup: (email: string, password: string, name: string, phone: string, role: UserRole) => Promise<void>;
-  logout: () => void;
-  updateUser: (updates: Partial<User>) => void;
-  updateUserProfile: (updates: Partial<User>) => void;
+  user: UserProfile | null;
+  login: (email: string, password: string, role: UserRole) => Promise<UserProfile>;
+  signup: (payload: SignupPayload) => Promise<{ requiresVerification: boolean }>;
+  logout: () => Promise<void>;
+  updateUser: (updates: Partial<UserProfile>) => Promise<void>;
+  updateUserProfile: (updates: Partial<UserProfile>) => Promise<void>;
   isAuthenticated: boolean;
   loading: boolean;
+}
+
+interface UserTableRow {
+  id: string;
+  email: string;
+  role: UserRole;
+  first_name?: string | null;
+  last_name?: string | null;
+  phone?: string | null;
+  income?: number | null;
+  income_type?: 'monthly' | 'yearly' | null;
+  preferred_property_type?: 'rent' | 'buy' | null;
+  created_at?: string;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Initialize localStorage and check for existing session
   useEffect(() => {
     initializeStorage();
-    checkSession();
+
+    const initializeSession = async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (data.session?.user) {
+          const profile = await loadUserProfile(data.session.user);
+          setUser(profile);
+        }
+      } catch (error) {
+        console.error('Failed to restore session', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initializeSession();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      await handleSessionChange(session);
+    });
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
-  const checkSession = () => {
-    try {
-      const sessionData = localStorage.getItem('currentUser');
-      if (sessionData) {
-        const userData = JSON.parse(sessionData);
-        setUser(userData);
-        localStorage.setItem('currentUserId', userData.id);
-      }
-    } catch (error) {
-      console.error('Session check error:', error);
-      localStorage.removeItem('currentUser');
-      localStorage.removeItem('currentUserId');
-    } finally {
-      setLoading(false);
+  const handleSessionChange = async (session: Session | null) => {
+    if (!session?.user) {
+      setUser(null);
+      return;
     }
+
+    try {
+      const profile = await loadUserProfile(session.user);
+      setUser(profile);
+    } catch (error) {
+      console.error('Failed to refresh profile', error);
+    }
+  };
+
+  const loadUserProfile = async (authUser: SupabaseAuthUser): Promise<UserProfile> => {
+    const { data: profileData, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', authUser.id)
+      .maybeSingle();
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Failed to load profile', error);
+      throw error;
+    }
+
+    return mapProfile(authUser, profileData || undefined);
+  };
+
+  const mapProfile = (authUser: SupabaseAuthUser, profile?: UserTableRow): UserProfile => {
+    const firstName = profile?.first_name || (authUser.user_metadata?.first_name as string | undefined) || '';
+    const lastName = profile?.last_name || (authUser.user_metadata?.last_name as string | undefined) || '';
+    const nameFromMetadata =
+      (authUser.user_metadata?.full_name as string | undefined) ||
+      (authUser.user_metadata?.name as string | undefined);
+    const metadataIncomeType =
+      (authUser.user_metadata?.incomeType as 'monthly' | 'yearly' | undefined) ||
+      (authUser.user_metadata?.income_type as 'monthly' | 'yearly' | undefined);
+    const metadataPreferredPropertyType =
+      (authUser.user_metadata?.preferredPropertyType as 'rent' | 'buy' | undefined) ||
+      (authUser.user_metadata?.preferred_property_type as 'rent' | 'buy' | undefined);
+    const computedName = `${firstName} ${lastName}`.trim();
+
+    return {
+      id: authUser.id,
+      email: authUser.email || profile?.email || '',
+      role: (profile?.role || (authUser.user_metadata?.role as UserRole) || 'tenant'),
+      name: computedName || nameFromMetadata || profile?.email || authUser.email || undefined,
+      firstName: firstName || undefined,
+      lastName: lastName || undefined,
+      phone: profile?.phone || (authUser.user_metadata?.phone as string | undefined),
+      income: profile?.income ?? (authUser.user_metadata?.income as number | undefined),
+      incomeType: profile?.income_type || metadataIncomeType || undefined,
+      preferredPropertyType: profile?.preferred_property_type || metadataPreferredPropertyType || undefined,
+      createdAt: profile?.created_at || authUser.created_at,
+    };
   };
 
   const login = async (email: string, password: string, role: UserRole) => {
-    return new Promise<void>((resolve, reject) => {
-      try {
-        const foundUser = getUserByEmail(email);
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-        if (!foundUser) {
-          reject(new Error('User not found'));
-          return;
-        }
+    if (error) {
+      throw error;
+    }
 
-        if (foundUser.password !== password) {
-          reject(new Error('Invalid email or password'));
-          return;
-        }
+    if (!data.user) {
+      throw new Error('Login failed');
+    }
 
-        // Allow admins to login with any role selection
-        // For other users, check if role matches
-        if (foundUser.role !== 'admin' && foundUser.role !== role) {
-          reject(new Error(`This account is registered as a ${foundUser.role}, not a ${role}`));
-          return;
-        }
+    if (!data.user.email_confirmed_at) {
+      await supabase.auth.signOut();
+      throw new Error('Email not confirmed');
+    }
 
-        // Store session
-        localStorage.setItem('currentUser', JSON.stringify(foundUser));
-        localStorage.setItem('currentUserId', foundUser.id);
-        setUser(foundUser);
-        resolve();
-      } catch (error: any) {
-        console.error('Login error:', error);
-        reject(error);
-      }
-    });
+    const profile = await loadUserProfile(data.user);
+
+    if (profile.role !== 'admin' && profile.role !== role) {
+      await supabase.auth.signOut();
+      throw new Error(`This account is registered as a ${profile.role}, not a ${role}`);
+    }
+
+    setUser(profile);
+    return profile;
   };
 
-  const signup = async (email: string, password: string, name: string, phone: string, role: UserRole) => {
-    return new Promise<void>((resolve, reject) => {
-      try {
-        // Check if user already exists
-        const existingUser = getUserByEmail(email);
-        if (existingUser) {
-          reject(new Error('An account with this email already exists'));
-          return;
-        }
+  const signup = async (payload: SignupPayload) => {
+    const { email, password, firstName, lastName, phone, role, income, incomeType, preferredPropertyType } = payload;
 
-        // Create new user
-        const newUser = createUser({
-          email,
-          password,
-          name,
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/login`,
+        data: {
+          first_name: firstName,
+          last_name: lastName,
           phone,
           role,
-        });
-
-        // Store session
-        localStorage.setItem('currentUser', JSON.stringify(newUser));
-        localStorage.setItem('currentUserId', newUser.id);
-        setUser(newUser);
-        resolve();
-      } catch (error: any) {
-        console.error('Signup error:', error);
-        reject(error);
-      }
+          income,
+          income_type: incomeType,
+          preferred_property_type: preferredPropertyType,
+        },
+      },
     });
+
+    if (error) {
+      throw error;
+    }
+
+    if (data.user) {
+      const { error: profileError } = await supabase.from('users').upsert({
+        id: data.user.id,
+        email,
+        first_name: firstName,
+        last_name: lastName,
+        phone,
+        role,
+        income,
+        income_type: incomeType,
+        preferred_property_type: preferredPropertyType,
+      });
+
+      if (profileError) {
+        console.error('Failed to persist profile', profileError);
+        throw profileError;
+      }
+    }
+
+    if (data.session?.user?.email_confirmed_at) {
+      const profile = await loadUserProfile(data.session.user);
+      setUser(profile);
+      return { requiresVerification: false };
+    }
+
+    return { requiresVerification: true };
   };
 
-  const logout = () => {
-    localStorage.removeItem('currentUser');
-    localStorage.removeItem('currentUserId');
+  const logout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
   };
 
-  const updateUser = (updates: Partial<User>) => {
+  const updateUser = async (updates: Partial<UserProfile>) => {
     if (!user) return;
 
-    const updatedUser = updateUserInStorage(user.id, updates);
-    if (updatedUser) {
-      setUser(updatedUser);
-      localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+    const payload: Record<string, any> = {};
+    if (updates.firstName !== undefined) payload.first_name = updates.firstName;
+    if (updates.lastName !== undefined) payload.last_name = updates.lastName;
+    if (updates.phone !== undefined) payload.phone = updates.phone;
+    if (updates.role !== undefined) payload.role = updates.role;
+    if (updates.income !== undefined) payload.income = updates.income;
+    if (updates.incomeType !== undefined) payload.income_type = updates.incomeType;
+    if (updates.preferredPropertyType !== undefined) payload.preferred_property_type = updates.preferredPropertyType;
+    if (updates.name !== undefined) {
+      const [first, ...rest] = updates.name.split(' ');
+      payload.first_name = payload.first_name ?? first;
+      payload.last_name = payload.last_name ?? rest.join(' ');
+    }
+
+    if (Object.keys(payload).length === 0) return;
+
+    const { data, error } = await supabase
+      .from('users')
+      .update(payload)
+      .eq('id', user.id)
+      .select('*')
+      .maybeSingle();
+
+    if (error) {
+      console.error('Failed to update profile', error);
+      throw error;
+    }
+
+    await supabase.auth.updateUser({
+      data: {
+        ...payload,
+        incomeType: updates.incomeType,
+        preferredPropertyType: updates.preferredPropertyType,
+      },
+    });
+
+    const session = await supabase.auth.getSession();
+    if (session.data.session?.user) {
+      const refreshed = mapProfile(session.data.session.user, data || undefined);
+      setUser(refreshed);
     }
   };
-  
-  const updateUserProfile = (updates: Partial<User>) => {
-    // Alias for updateUser - same functionality
-    updateUser(updates);
+
+  const updateUserProfile = async (updates: Partial<UserProfile>) => {
+    await updateUser(updates);
   };
 
   return (

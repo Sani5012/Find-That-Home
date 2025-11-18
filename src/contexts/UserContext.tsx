@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import type { User as SupabaseAuthUser, Session } from '@supabase/supabase-js';
+import type { PostgrestError, User as SupabaseAuthUser, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
 import { initializeStorage } from '../utils/localStorage';
 
@@ -86,6 +86,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
           setUser(profile);
         }
       } catch (error) {
+        handlePossibleNetworkError(error, 'restoring your session');
         console.error('Failed to restore session', error);
       } finally {
         setLoading(false);
@@ -118,18 +119,23 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   const loadUserProfile = async (authUser: SupabaseAuthUser): Promise<UserProfile> => {
-    const { data: profileData, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', authUser.id)
-      .maybeSingle();
+    try {
+      const { data: profileData, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', authUser.id)
+        .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') {
-      console.error('Failed to load profile', error);
+      if (error && error.code !== 'PGRST116') {
+        console.error('Failed to load profile', error);
+        throw error;
+      }
+
+      return mapProfile(authUser, profileData || undefined);
+    } catch (error) {
+      handlePossibleNetworkError(error, 'loading your profile');
       throw error;
     }
-
-    return mapProfile(authUser, profileData || undefined);
   };
 
   const mapProfile = (authUser: SupabaseAuthUser, profile?: UserTableRow): UserProfile => {
@@ -162,41 +168,66 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   const login = async (email: string, password: string, role: UserRole) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-    if (error) {
+      if (error) {
+        throw error;
+      }
+
+      if (!data.user) {
+        throw new Error('Login failed');
+      }
+
+      if (!data.user.email_confirmed_at) {
+        await supabase.auth.signOut();
+        throw new Error('Email not confirmed');
+      }
+
+      const profile = await loadUserProfile(data.user);
+
+      if (profile.role !== 'admin' && profile.role !== role) {
+        await supabase.auth.signOut();
+        throw new Error(`This account is registered as a ${profile.role}, not a ${role}`);
+      }
+
+      setUser(profile);
+      return profile;
+    } catch (error) {
+      handlePossibleNetworkError(error, 'logging in');
       throw error;
     }
-
-    if (!data.user) {
-      throw new Error('Login failed');
-    }
-
-    if (!data.user.email_confirmed_at) {
-      await supabase.auth.signOut();
-      throw new Error('Email not confirmed');
-    }
-
-    const profile = await loadUserProfile(data.user);
-
-    if (profile.role !== 'admin' && profile.role !== role) {
-      await supabase.auth.signOut();
-      throw new Error(`This account is registered as a ${profile.role}, not a ${role}`);
-    }
-
-    setUser(profile);
-    return profile;
   };
 
   const signup = async (payload: SignupPayload) => {
     const { email, password, firstName, lastName, phone, role, income, incomeType, preferredPropertyType } = payload;
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/login`,
-        data: {
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/login`,
+          data: {
+            first_name: firstName,
+            last_name: lastName,
+            phone,
+            role,
+            income,
+            income_type: incomeType,
+            preferred_property_type: preferredPropertyType,
+          },
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data.user) {
+        const { error: profileError } = await supabase.from('users').upsert({
+          id: data.user.id,
+          email,
           first_name: firstName,
           last_name: lastName,
           phone,
@@ -204,40 +235,25 @@ export function UserProvider({ children }: { children: ReactNode }) {
           income,
           income_type: incomeType,
           preferred_property_type: preferredPropertyType,
-        },
-      },
-    });
+        });
 
-    if (error) {
+        if (profileError) {
+          console.error('Failed to persist profile', profileError);
+          throw profileError;
+        }
+      }
+
+      if (data.session?.user?.email_confirmed_at) {
+        const profile = await loadUserProfile(data.session.user);
+        setUser(profile);
+        return { requiresVerification: false };
+      }
+
+      return { requiresVerification: true };
+    } catch (error) {
+      handlePossibleNetworkError(error, 'signing up');
       throw error;
     }
-
-    if (data.user) {
-      const { error: profileError } = await supabase.from('users').upsert({
-        id: data.user.id,
-        email,
-        first_name: firstName,
-        last_name: lastName,
-        phone,
-        role,
-        income,
-        income_type: incomeType,
-        preferred_property_type: preferredPropertyType,
-      });
-
-      if (profileError) {
-        console.error('Failed to persist profile', profileError);
-        throw profileError;
-      }
-    }
-
-    if (data.session?.user?.email_confirmed_at) {
-      const profile = await loadUserProfile(data.session.user);
-      setUser(profile);
-      return { requiresVerification: false };
-    }
-
-    return { requiresVerification: true };
   };
 
   const logout = async () => {
@@ -264,30 +280,35 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     if (Object.keys(payload).length === 0) return;
 
-    const { data, error } = await supabase
-      .from('users')
-      .update(payload)
-      .eq('id', user.id)
-      .select('*')
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .update(payload)
+        .eq('id', user.id)
+        .select('*')
+        .maybeSingle();
 
-    if (error) {
-      console.error('Failed to update profile', error);
+      if (error) {
+        console.error('Failed to update profile', error);
+        throw error;
+      }
+
+      await supabase.auth.updateUser({
+        data: {
+          ...payload,
+          incomeType: updates.incomeType,
+          preferredPropertyType: updates.preferredPropertyType,
+        },
+      });
+
+      const session = await supabase.auth.getSession();
+      if (session.data.session?.user) {
+        const refreshed = mapProfile(session.data.session.user, data || undefined);
+        setUser(refreshed);
+      }
+    } catch (error) {
+      handlePossibleNetworkError(error, 'updating your profile');
       throw error;
-    }
-
-    await supabase.auth.updateUser({
-      data: {
-        ...payload,
-        incomeType: updates.incomeType,
-        preferredPropertyType: updates.preferredPropertyType,
-      },
-    });
-
-    const session = await supabase.auth.getSession();
-    if (session.data.session?.user) {
-      const refreshed = mapProfile(session.data.session.user, data || undefined);
-      setUser(refreshed);
     }
   };
 
@@ -330,6 +351,16 @@ const isIgnorableProfileError = (error: PostgrestError | null) => {
     error.code === 'PGRST302' ||
     message.includes('does not exist')
   );
+};
+
+const handlePossibleNetworkError = (error: unknown, action: string) => {
+  if (!error) return;
+  if (isNetworkError(error)) {
+    throw new Error(
+      `Unable to reach Supabase while ${action}. ` +
+        'Confirm that VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set correctly in your .env file and that the Supabase project allows requests from this origin.'
+    );
+  }
 };
 
 export function useUser() {

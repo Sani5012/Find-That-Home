@@ -46,8 +46,8 @@ export function Login() {
       const loggedInUser = await login(email, password, selectedRole);
 
       if (loggedInUser.role === 'admin') {
-        toast.success('Welcome back, admin! Redirecting you to the control center.');
-        navigate('/admin-dashboard', { replace: true });
+        setIsLoading(false);
+        setShowWelcomeAdmin(true);
         return;
       }
 

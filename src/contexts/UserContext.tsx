@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import type { User as SupabaseAuthUser, Session, PostgrestError } from '@supabase/supabase-js';
+import type { User as SupabaseAuthUser, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
 import { initializeStorage } from '../utils/localStorage';
 
@@ -118,71 +118,18 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   const loadUserProfile = async (authUser: SupabaseAuthUser): Promise<UserProfile> => {
-    const profileData = await fetchProfileRow(authUser.id);
+    const { data: profileData, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', authUser.id)
+      .maybeSingle();
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Failed to load profile', error);
+      throw error;
+    }
+
     return mapProfile(authUser, profileData || undefined);
-  };
-
-  const fetchProfileRow = async (userId: string) => {
-    if (!profileTableAvailable) {
-      return undefined;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (error) {
-        if (error.code === 'PGRST116' || isIgnorableProfileError(error)) {
-          if (isIgnorableProfileError(error)) {
-            setProfileTableAvailable(false);
-          }
-          return undefined;
-        }
-
-        throw error;
-      }
-
-      return data ?? undefined;
-    } catch (error) {
-      if (isNetworkError(error)) {
-        console.warn('Supabase profile fetch failed, falling back to metadata', error);
-        setProfileTableAvailable(false);
-        return undefined;
-      }
-
-      throw error;
-    }
-  };
-
-  const syncProfileRow = async (payload: Partial<UserTableRow>) => {
-    if (!profileTableAvailable) {
-      return;
-    }
-
-    try {
-      const { error } = await supabase.from('users').upsert(payload);
-
-      if (error) {
-        if (isIgnorableProfileError(error)) {
-          setProfileTableAvailable(false);
-          console.warn('users table not available, continuing with auth metadata only');
-          return;
-        }
-
-        throw error;
-      }
-    } catch (error) {
-      if (isNetworkError(error)) {
-        setProfileTableAvailable(false);
-        console.warn('Network error while syncing profile, continuing with auth metadata only');
-        return;
-      }
-
-      throw error;
-    }
   };
 
   const mapProfile = (authUser: SupabaseAuthUser, profile?: UserTableRow): UserProfile => {
@@ -244,13 +191,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const signup = async (payload: SignupPayload) => {
     const { email, password, firstName, lastName, phone, role, income, incomeType, preferredPropertyType } = payload;
 
-    const emailRedirectTo = getEmailRedirectUrl();
-
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        ...(emailRedirectTo ? { emailRedirectTo } : {}),
+        emailRedirectTo: `${window.location.origin}/login`,
         data: {
           first_name: firstName,
           last_name: lastName,
@@ -268,7 +213,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
 
     if (data.user) {
-      await syncProfileRow({
+      const { error: profileError } = await supabase.from('users').upsert({
         id: data.user.id,
         email,
         first_name: firstName,
@@ -279,6 +224,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
         income_type: incomeType,
         preferred_property_type: preferredPropertyType,
       });
+
+      if (profileError) {
+        console.error('Failed to persist profile', profileError);
+        throw profileError;
+      }
     }
 
     if (data.session?.user?.email_confirmed_at) {
@@ -314,34 +264,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     if (Object.keys(payload).length === 0) return;
 
-    let profileData: UserTableRow | undefined;
-    if (profileTableAvailable) {
-      try {
-        const { data, error } = await supabase
-          .from('users')
-          .update(payload)
-          .eq('id', user.id)
-          .select('*')
-          .maybeSingle();
+    const { data, error } = await supabase
+      .from('users')
+      .update(payload)
+      .eq('id', user.id)
+      .select('*')
+      .maybeSingle();
 
-        if (error) {
-          if (isIgnorableProfileError(error)) {
-            console.warn('users table not available for updates, skipping');
-            setProfileTableAvailable(false);
-          } else {
-            throw error;
-          }
-        } else {
-          profileData = data ?? undefined;
-        }
-      } catch (error) {
-        if (isNetworkError(error)) {
-          console.warn('Network error while updating profile, skipping table sync');
-          setProfileTableAvailable(false);
-        } else {
-          throw error;
-        }
-      }
+    if (error) {
+      console.error('Failed to update profile', error);
+      throw error;
     }
 
     await supabase.auth.updateUser({
@@ -354,7 +286,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     const session = await supabase.auth.getSession();
     if (session.data.session?.user) {
-      const refreshed = mapProfile(session.data.session.user, profileData || undefined);
+      const refreshed = mapProfile(session.data.session.user, data || undefined);
       setUser(refreshed);
     }
   };

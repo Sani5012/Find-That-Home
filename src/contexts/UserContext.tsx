@@ -60,6 +60,20 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileTableAvailable, setProfileTableAvailable] = useState(true);
+
+  const getEmailRedirectUrl = () => {
+    const configuredUrl = import.meta.env.VITE_APP_URL;
+    if (configuredUrl) {
+      return `${configuredUrl.replace(/\/$/, '')}/login`;
+    }
+
+    if (typeof window !== 'undefined') {
+      return `${window.location.origin}/login`;
+    }
+
+    return undefined;
+  };
 
   useEffect(() => {
     initializeStorage();
@@ -298,6 +312,25 @@ export function UserProvider({ children }: { children: ReactNode }) {
     </UserContext.Provider>
   );
 }
+
+const isNetworkError = (error: unknown) => {
+  if (!error || typeof error !== 'object') return false;
+  const message = 'message' in error && typeof (error as { message?: string }).message === 'string'
+    ? (error as { message: string }).message.toLowerCase()
+    : '';
+  return message.includes('fetch failed') || message.includes('failed to fetch') || message.includes('network request failed');
+};
+
+const isIgnorableProfileError = (error: PostgrestError | null) => {
+  if (!error) return false;
+  const message = (error.message || '').toLowerCase();
+  return (
+    error.code === '42P01' ||
+    error.code === 'PGRST301' ||
+    error.code === 'PGRST302' ||
+    message.includes('does not exist')
+  );
+};
 
 export function useUser() {
   const context = useContext(UserContext);

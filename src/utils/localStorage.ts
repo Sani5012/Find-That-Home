@@ -74,9 +74,14 @@ export interface User {
   email: string;
   password: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
   phone?: string;
   role: 'tenant' | 'landlord' | 'buyer' | 'agent' | 'admin';
   createdAt: string;
+  income?: number;
+  incomeType?: 'monthly' | 'yearly';
+  preferredPropertyType?: 'rent' | 'buy';
   preferences?: {
     propertyType?: string[];
     priceRange?: { min: number; max: number };
@@ -104,6 +109,8 @@ export const initializeStorage = () => {
         email: 'admin@findthathome.com',
         password: 'admin123',
         name: 'Admin User',
+        firstName: 'Admin',
+        lastName: 'User',
         role: 'admin',
         createdAt: new Date().toISOString(),
       },
@@ -112,15 +119,21 @@ export const initializeStorage = () => {
         email: 'tenant@test.com',
         password: 'tenant123',
         name: 'John Tenant',
+        firstName: 'John',
+        lastName: 'Tenant',
         phone: '+44 20 1234 5678',
         role: 'tenant',
         createdAt: new Date().toISOString(),
+        preferredPropertyType: 'rent',
+        incomeType: 'monthly',
       },
       {
         id: 'landlord-1',
         email: 'landlord@test.com',
         password: 'landlord123',
         name: 'Sarah Landlord',
+        firstName: 'Sarah',
+        lastName: 'Landlord',
         phone: '+44 20 2345 6789',
         role: 'landlord',
         createdAt: new Date().toISOString(),
@@ -130,6 +143,8 @@ export const initializeStorage = () => {
         email: 'agent@test.com',
         password: 'agent123',
         name: 'Michael Agent',
+        firstName: 'Michael',
+        lastName: 'Agent',
         phone: '+44 20 3456 7890',
         role: 'agent',
         createdAt: new Date().toISOString(),
@@ -139,9 +154,12 @@ export const initializeStorage = () => {
         email: 'buyer@test.com',
         password: 'buyer123',
         name: 'Emma Buyer',
+        firstName: 'Emma',
+        lastName: 'Buyer',
         phone: '+44 20 4567 8901',
         role: 'buyer',
         createdAt: new Date().toISOString(),
+        preferredPropertyType: 'buy',
       },
     ];
     localStorage.setItem('users', JSON.stringify(defaultUsers));

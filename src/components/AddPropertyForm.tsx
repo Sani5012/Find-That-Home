@@ -13,7 +13,7 @@ import { Slider } from './ui/slider';
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from './ui/alert-dialog';
 import { toast } from 'sonner@2.0.3';
 import { useUser } from '../contexts/UserContext';
-import { createProperty } from '../utils/localStorage';
+import { propertyStore } from '../services/platformData';
 import { LeafletMap } from './LeafletMap';
 import { 
   Home, MapPin, DollarSign, Bed, Bath, Maximize, Image as ImageIcon,
@@ -139,12 +139,21 @@ export function AddPropertyForm() {
       postcode: 'Postcode',
     };
 
-    const missing: string[] = [];
-    for (const [key, label] of Object.entries(requiredFields)) {
-      if (!eval(key)) {
-        missing.push(label);
-      }
-    }
+    const fieldValues: Record<string, string> = {
+      title,
+      description,
+      price,
+      bedrooms,
+      bathrooms,
+      area,
+      address,
+      city,
+      postcode,
+    };
+
+    const missing = Object.entries(requiredFields)
+      .filter(([key]) => !fieldValues[key]?.toString().trim())
+      .map(([, label]) => label);
 
     if (missing.length > 0) {
       setMissingFields(missing);
@@ -160,95 +169,26 @@ export function AddPropertyForm() {
     setIsLoading(true);
 
     try {
-      const pricePerSqFt = parseFloat(price) / parseFloat(area);
-
-      const newProperty = createProperty({
+      await propertyStore.create({
         title,
         description,
-        type,
+        listingType: type,
         price: parseFloat(price),
         bedrooms: parseInt(bedrooms),
         bathrooms: parseFloat(bathrooms),
-        area: parseFloat(area),
-        features,
-        images,
-        location: {
-          address,
-          city,
-          postcode,
-          coordinates: {
-            lat: parseFloat(latitude),
-            lng: parseFloat(longitude),
-          },
-        },
-        agentId: user.id,
-        agentName: user.name,
+        address,
+        city,
+        postcode,
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        image: images[0],
+        agentUserId: user.id,
         agentEmail: user.email,
+        agentName: user.name,
         agentPhone: user.phone,
-        approvalStatus: 'pending',
-        // Enhanced fields
-        commuteOptions: {
-          ...(trainStation && {
-            trainStation: {
-              name: trainStation,
-              distance: trainDistance,
-              walkTime: trainWalkTime,
-            },
-          }),
-          ...(busCount && {
-            busStops: {
-              count: parseInt(busCount),
-              nearestDistance: busDistance,
-            },
-          }),
-          ...(motorway && {
-            motorway: {
-              name: motorway,
-              distance: motorwayDistance,
-            },
-          }),
-          ...(airport && {
-            airport: {
-              name: airport,
-              distance: airportDistance,
-            },
-          }),
-        },
-        neighborhoodVibe: {
-          description: neighborhoodDescription,
-          tags: neighborhoodTags,
-          rating: neighborhoodRating,
-          noiseLevel,
-        },
-        lifestyleScores: {
-          walkScore,
-          transitScore,
-          bikeScore,
-          schoolRating,
-          restaurantRating,
-          shoppingRating,
-          nightlifeRating,
-          parksRating,
-        },
-        demographics: {
-          ...(population && { population: parseInt(population) }),
-          ...(medianAge && { medianAge: parseInt(medianAge) }),
-          ...(medianIncome && { medianIncome: parseInt(medianIncome) }),
-          ...(employmentRate && { employmentRate: parseFloat(employmentRate) }),
-          ...(educationLevel && { educationLevel }),
-          crimeRate,
-        },
-        investmentInsights: {
-          ...(rentalYield && { averageRentalYield: parseFloat(rentalYield) }),
-          ...(appreciationRate && { propertyAppreciation: parseFloat(appreciationRate) }),
-          marketTrend,
-          rentalDemand,
-          ...(comparableProperties && { comparableProperties: parseInt(comparableProperties) }),
-          pricePerSqFt,
-        },
       });
 
-      toast.success('Property submitted successfully! It will be reviewed by an admin before appearing in search.');
+      toast.success('Property submitted successfully! It will be reviewed by the platform before appearing in search.');
       // Navigate to agent dashboard after successful submission
       navigate('/agent-dashboard');
     } catch (error: any) {

@@ -14,10 +14,9 @@ import { ImageWithFallback } from './Fallback/ImageWithFallback';
 import { PropertyMap } from './PropertyMap';
 import { PropertyQRCode } from './PropertyQRCode';
 import { ChatWindow } from './ChatWindow';
-import { mockProperties } from '../data/mockProperties';
 import { useUser } from '../contexts/UserContext';
-import { getPropertyById } from '../utils/localStorage';
 import { Property } from '../types/property';
+import { offerStore, propertyStore } from '../services/platformData';
 import { 
   Bed, Bath, Maximize, MapPin, Calendar, Home, DollarSign, Clock, School, Heart, Share2, 
   ChevronLeft, ChevronRight, Volume2, Navigation, Train, TrendingUp, Users, Send,
@@ -43,6 +42,7 @@ export function PropertyDetails() {
   const [moveInDate, setMoveInDate] = useState('');
   const [leaseTerm, setLeaseTerm] = useState('12');
   const [offerMessage, setOfferMessage] = useState('');
+  const [submittingOffer, setSubmittingOffer] = useState(false);
   
   // Chat states
   const [showChatDialog, setShowChatDialog] = useState(false);
@@ -71,32 +71,17 @@ export function PropertyDetails() {
     return null;
   };
 
-  // Fetch property from localStorage
+  // Fetch property from Supabase
   useEffect(() => {
     const fetchProperty = async () => {
       if (!id) return;
-      
+
       setLoading(true);
-      
+
       try {
-        // Try to get property from localStorage
-        const localProperty = getPropertyById(id);
-        
-        if (localProperty) {
-          console.log(`✓ Found property ${id} in localStorage`);
-          setProperty(localProperty);
-          setLandlordId(localProperty.landlordId || '');
-        } else {
-          // Fallback to mock properties
-          console.log(`Property ${id} not in localStorage, checking mock data`);
-          const mockProperty = mockProperties.find(p => p.id === id);
-          if (mockProperty) {
-            setProperty(mockProperty);
-            setLandlordId(mockProperty.landlordId || '');
-          } else {
-            setProperty(null);
-          }
-        }
+        const remoteProperty = await propertyStore.getById(id);
+        setProperty(remoteProperty);
+        setLandlordId(remoteProperty?.landlordId || '');
       } catch (error) {
         console.error('Error fetching property:', error);
         setProperty(null);
@@ -184,21 +169,43 @@ export function PropertyDetails() {
     setAffordabilityResult(result);
   };
 
-  const submitRentalOffer = () => {
+  const submitRentalOffer = async () => {
+    if (!property) {
+      toast.error('Property not found. Please try again.');
+      return;
+    }
+
+    if (!isAuthenticated || !user?.id) {
+      toast.error('Please sign in to submit an offer');
+      navigate('/login');
+      return;
+    }
+
     if (!offerRent || !moveInDate || !leaseTerm) {
       toast.error('Please fill in all required fields');
       return;
     }
 
-    // Simulate offer submission
-    toast.success('Offer submitted! The landlord will review and respond within 48 hours.');
-    setShowOfferDialog(false);
-    
-    // Reset form
-    setOfferRent('');
-    setMoveInDate('');
-    setLeaseTerm('12');
-    setOfferMessage('');
+    try {
+      setSubmittingOffer(true);
+      await offerStore.create({
+        userId: user.id,
+        propertyId: property.id,
+        offerType: property.listingType ?? property.type ?? 'rent',
+      });
+
+      toast.success('Offer submitted! The landlord will review and respond within 48 hours.');
+      setShowOfferDialog(false);
+      setOfferRent('');
+      setMoveInDate('');
+      setLeaseTerm('12');
+      setOfferMessage('');
+    } catch (error) {
+      console.error('Failed to submit offer', error);
+      toast.error('Failed to submit offer. Please try again.');
+    } finally {
+      setSubmittingOffer(false);
+    }
   };
 
   const handleContactOwner = () => {
@@ -748,8 +755,14 @@ export function PropertyDetails() {
                             className="mt-1"
                           />
                         </div>
-                        <Button onClick={submitRentalOffer} className="w-full">
-                          Submit Offer
+                        <Button onClick={submitRentalOffer} className="w-full" disabled={submittingOffer}>
+                          {submittingOffer ? (
+                            <span className="flex items-center gap-2">
+                              <Loader2 className="h-4 w-4 animate-spin" /> Submitting...
+                            </span>
+                          ) : (
+                            'Submit Offer'
+                          )}
                         </Button>
                       </div>
                     </DialogContent>

@@ -16,10 +16,9 @@ import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 import { ImageWithFallback } from './Fallback/ImageWithFallback';
 import { PropertiesMapView } from './PropertiesMapView';
 import { ChatWindow } from './ChatWindow';
-import { mockProperties } from '../data/mockProperties';
 import { Property } from '../types/property';
 import { useUser } from '../contexts/UserContext';
-import { getAllProperties } from '../utils/localStorage';
+import { propertyStore } from '../services/platformData';
 import { 
   Bed, Bath, Maximize, MapPin, Grid, List, Map, X, ChevronDown, ChevronUp,
   Volume2, Navigation, Train, TrendingUp, Users, DollarSign, Filter, Calculator, MessageCircle,
@@ -31,8 +30,8 @@ export function PropertySearchResults() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user, isAuthenticated } = useUser();
-  const [allProperties, setAllProperties] = useState<Property[]>(mockProperties);
-  const [filteredProperties, setFilteredProperties] = useState<Property[]>(mockProperties);
+  const [allProperties, setAllProperties] = useState<Property[]>([]);
+  const [filteredProperties, setFilteredProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list' | 'map'>('grid');
   const [sortBy, setSortBy] = useState('price-asc');
@@ -98,44 +97,14 @@ export function PropertySearchResults() {
     ))
   ).sort();
 
-  // Fetch properties from localStorage on mount
+  // Fetch properties from Supabase on mount
   useEffect(() => {
     const fetchProperties = async () => {
       setLoading(true);
       try {
-        const localProperties = getAllProperties();
-        console.log('📥 localStorage properties count:', localProperties.length);
-        console.log('📚 Mock properties count:', mockProperties.length);
-        
-        // Filter only approved properties from localStorage
-        const approvedLocalProperties = localProperties.filter((p: Property) => 
-          p.approvalStatus === 'approved'
-        );
-        console.log('✅ Approved localStorage properties:', approvedLocalProperties.length);
-        
-        // Combine mock properties with approved localStorage properties, removing duplicates by ID
-        const allPropertiesById: Record<string, Property> = {};
-        
-        // Add mock properties first
-        mockProperties.forEach(p => {
-          if (p && p.id) {
-            allPropertiesById[p.id] = p;
-          }
-        });
-        
-        // Add approved localStorage properties (will override mocks with same ID)
-        approvedLocalProperties.forEach((p: Property) => {
-          if (p && p.id) {
-            allPropertiesById[p.id] = p;
-          }
-        });
-        
-        const combined = Object.values(allPropertiesById);
-        console.log('✅ Combined unique properties:', combined.length);
-        console.log('🔑 Unique IDs:', Object.keys(allPropertiesById));
-        
-        setAllProperties(combined);
-        
+        const supabaseProperties = await propertyStore.getApproved();
+        setAllProperties(supabaseProperties);
+
         // Check for GPS search parameters
         const gpsParam = searchParams.get('gps');
         const latParam = searchParams.get('lat');
@@ -151,8 +120,7 @@ export function PropertySearchResults() {
         }
       } catch (error) {
         console.error('Error fetching properties:', error);
-        // Use mock properties as fallback
-        setAllProperties(mockProperties);
+        setAllProperties([]);
       } finally {
         setLoading(false);
       }
@@ -175,7 +143,7 @@ export function PropertySearchResults() {
 
     // Type filter
     if (selectedType !== 'any') {
-      filtered = filtered.filter(p => p.type === selectedType);
+      filtered = filtered.filter(p => (p.listingType || p.type) === selectedType);
     }
 
     // City filter

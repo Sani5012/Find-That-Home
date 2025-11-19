@@ -17,10 +17,9 @@ import { PropertiesMapView } from './PropertiesMapView';
 import { NearbyPropertiesMap } from './NearbyPropertiesMap';
 import { ChatWindow } from './ChatWindow';
 import { useGPSLocation } from '../hooks/useGPSLocation';
-import { mockProperties } from '../data/mockProperties';
 import { Property } from '../types/property';
 import { useUser } from '../contexts/UserContext';
-import { getAllProperties } from '../utils/localStorage';
+import { propertyStore } from '../services/platformData';
 import { 
   MapPin, Navigation, Bed, Bath, Maximize, DollarSign, Grid, Map,
   Info, Bell, BellOff, Volume2, Train, TrendingUp, Users, MessageCircle,
@@ -42,50 +41,35 @@ export function NearbyProperties() {
   const [searchRadius, setSearchRadius] = useState([5]); // miles
   const [customRadius, setCustomRadius] = useState('5'); // for input field
   const [showAdvancedRadius, setShowAdvancedRadius] = useState(false);
-  const [showRadiusGuide, setShowRadiusGuide] = useState(() => {
-    return !localStorage.getItem('hasSeenRadiusGuide');
-  });
-  const [gpsAlertsEnabled, setGpsAlertsEnabled] = useState(() => {
-    return localStorage.getItem('gpsAlertsEnabled') === 'true';
-  });
-  const [notifiedProperties, setNotifiedProperties] = useState<Set<string>>(() => {
-    const stored = localStorage.getItem('notifiedProperties');
-    return stored ? new Set(JSON.parse(stored)) : new Set();
-  });
+  const [showRadiusGuide, setShowRadiusGuide] = useState(true);
+  const [gpsAlertsEnabled, setGpsAlertsEnabled] = useState(false);
+  const [notifiedProperties, setNotifiedProperties] = useState<Set<string>>(new Set());
   const [showChatDialog, setShowChatDialog] = useState(false);
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'map'>('map');
 
-  // Get user preferences from localStorage
-  const userPreferences = useMemo((): UserPreferences | null => {
-    const stored = localStorage.getItem('userPreferences');
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }, []);
+  const userPreferences = null;
 
-  const [allProperties, setAllProperties] = useState<Property[]>(mockProperties);
+  const [allProperties, setAllProperties] = useState<Property[]>([]);
 
   // Fetch all properties on mount
   useEffect(() => {
+    let isMounted = true;
     const fetchProperties = async () => {
       try {
-        const localProperties = getAllProperties();
-        // Combine mock and localStorage properties
-        setAllProperties([...mockProperties, ...localProperties]);
+        const properties = await propertyStore.getApproved();
+        if (isMounted) {
+          setAllProperties(properties);
+        }
       } catch (error) {
         console.error('Error fetching properties:', error);
-        // Use mock as fallback
-        setAllProperties(mockProperties);
       }
     };
 
     fetchProperties();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Find nearby properties
@@ -168,7 +152,6 @@ export function NearbyProperties() {
         setNotifiedProperties(prev => {
           const updated = new Set(prev);
           updated.add(property.id);
-          localStorage.setItem('notifiedProperties', JSON.stringify([...updated]));
           return updated;
         });
       }
@@ -178,7 +161,6 @@ export function NearbyProperties() {
   // Toggle GPS alerts
   const toggleGPSAlerts = (enabled: boolean) => {
     setGpsAlertsEnabled(enabled);
-    localStorage.setItem('gpsAlertsEnabled', enabled.toString());
     
     if (enabled) {
       requestLocation();
@@ -203,7 +185,6 @@ export function NearbyProperties() {
     setCustomRadius(miles.toString());
     if (showRadiusGuide) {
       setShowRadiusGuide(false);
-      localStorage.setItem('hasSeenRadiusGuide', 'true');
     }
   };
 
@@ -377,7 +358,6 @@ export function NearbyProperties() {
                         className="mt-2"
                         onClick={() => {
                           setShowRadiusGuide(false);
-                          localStorage.setItem('hasSeenRadiusGuide', 'true');
                         }}
                       >
                         Got it!

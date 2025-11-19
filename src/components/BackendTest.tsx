@@ -4,7 +4,8 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { CheckCircle2, XCircle, Loader2, Database } from 'lucide-react';
-import { healthCheck, userAPI } from '../utils/api';
+import { healthCheck } from '../utils/api';
+import { supabase } from '../lib/supabaseClient';
 import { useUser } from '../contexts/UserContext';
 
 export function BackendTest() {
@@ -35,10 +36,24 @@ export function BackendTest() {
   const fetchProfile = async () => {
     setTestStatus('loading');
     setTestMessage('Fetching user profile from backend...');
-    
+
     try {
-      const { profile } = await userAPI.getProfile();
-      setProfileData(profile);
+      const { data: authData, error } = await supabase.auth.getUser();
+      if (error || !authData.user) {
+        throw new Error(error?.message || 'Not authenticated');
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', authData.user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        throw new Error(profileError.message);
+      }
+
+      setProfileData(profile || authData.user);
       setTestStatus('success');
       setTestMessage('Profile loaded successfully!');
     } catch (error: any) {
@@ -66,10 +81,10 @@ export function BackendTest() {
       <CardHeader>
         <div className="flex items-center gap-2">
           <Database className="h-6 w-6 text-blue-600" />
-          <CardTitle>LocalStorage Integration Test</CardTitle>
+          <CardTitle>Supabase Connectivity Test</CardTitle>
         </div>
         <CardDescription>
-          Test the localStorage API connection and endpoints
+          Verify the Supabase database connection and APIs
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">

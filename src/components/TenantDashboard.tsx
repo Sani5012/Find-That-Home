@@ -1,74 +1,154 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { mockProperties } from '../data/mockProperties';
 import { useUser } from '../contexts/UserContext';
-import { 
-  Home, FileText, Bell, Calendar, DollarSign, CheckCircle, Clock, 
-  AlertCircle, MapPin, MessageSquare, TrendingUp, Heart, Eye
+import {
+  Home, FileText, Bell, Calendar, DollarSign, CheckCircle, Clock,
+  MapPin, MessageSquare, TrendingUp, Heart, Eye, Loader2
 } from 'lucide-react';
+import { alertStore, offerStore, propertyStore } from '../services/platformData';
+import { Property, RentalOffer, Alert } from '../types/property';
+
+const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1484154218962-a197022b5858?w=600';
 
 export function TenantDashboard() {
   const navigate = useNavigate();
   const { user } = useUser();
-  
-  // Mock data for tenant applications
-  const [applications] = useState([
-    {
-      id: 'app-1',
-      propertyId: '9',
-      property: mockProperties.find(p => p.id === '9'),
-      status: 'pending',
-      appliedDate: '2025-10-25',
-      offeredRent: 2000,
-      moveInDate: '2025-12-01',
-      leaseTerm: 12,
-      progress: 40,
-    },
-    {
-      id: 'app-2',
-      propertyId: '10',
-      property: mockProperties.find(p => p.id === '10'),
-      status: 'accepted',
-      appliedDate: '2025-10-20',
-      offeredRent: 1800,
-      moveInDate: '2025-11-15',
-      leaseTerm: 12,
-      progress: 85,
-    },
-  ]);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [offers, setOffers] = useState<RentalOffer[]>([]);
+  const [loadingOffers, setLoadingOffers] = useState(false);
+  const [notifications, setNotifications] = useState<Alert[]>([]);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
 
-  const [savedProperties] = useState(
-    mockProperties.filter(p => p.listingType === 'rent').slice(0, 3)
+  useEffect(() => {
+    let isMounted = true;
+    const load = async () => {
+      try {
+        const data = await propertyStore.getApproved();
+        if (isMounted) {
+          setProperties(data);
+        }
+      } catch (error) {
+        console.error('Failed to load tenant properties', error);
+      }
+    };
+    load();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!user?.id) {
+      setOffers([]);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    const loadOffers = async () => {
+      try {
+        setLoadingOffers(true);
+        const data = await offerStore.getByUser(user.id);
+        if (isMounted) {
+          const rentalOffers = data.filter(offer => {
+            const type = (offer.offerType ?? '').toLowerCase();
+            if (type.includes('rent')) return true;
+            const listing = (offer.property?.listingType ?? offer.property?.type ?? '').toLowerCase();
+            return listing === 'rent';
+          });
+          setOffers(rentalOffers);
+        }
+      } catch (error) {
+        console.error('Failed to load tenant offers', error);
+      } finally {
+        if (isMounted) {
+          setLoadingOffers(false);
+        }
+      }
+    };
+
+    loadOffers();
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!user?.id) {
+      setNotifications([]);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    const loadNotifications = async () => {
+      try {
+        setLoadingNotifications(true);
+        const data = await alertStore.getByUser(user.id);
+        if (isMounted) {
+          setNotifications(data);
+        }
+      } catch (error) {
+        console.error('Failed to load tenant alerts', error);
+      } finally {
+        if (isMounted) {
+          setLoadingNotifications(false);
+        }
+      }
+    };
+
+    loadNotifications();
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.id]);
+
+  const rentProperties = useMemo(
+    () => properties.filter(p => (p.listingType || p.type) === 'rent'),
+    [properties]
   );
 
-  const [notifications] = useState([
-    {
-      id: '1',
-      type: 'new-listing',
-      message: 'New property matching your preferences in Camden',
-      date: '2025-10-29',
-      read: false,
-    },
-    {
-      id: '2',
-      type: 'application-update',
-      message: 'Your application for Riverside Loft has been accepted!',
-      date: '2025-10-28',
-      read: false,
-    },
-    {
-      id: '3',
-      type: 'price-drop',
-      message: 'Price reduced on a saved property',
-      date: '2025-10-27',
-      read: true,
-    },
-  ]);
+  const normalizeStatus = (value?: string) => (value ?? '').toLowerCase();
+  const formatDate = (value?: string) => {
+    if (!value) return 'TBD';
+    try {
+      return new Date(value).toLocaleDateString();
+    } catch (error) {
+      return value;
+    }
+  };
+
+  const applications = useMemo(() => {
+    if (offers.length === 0) return [];
+    return offers.map((offer, index) => ({
+      id: offer.id,
+      propertyId: offer.propertyId,
+      property: offer.property,
+      status: offer.status,
+      appliedDate: offer.createdAt,
+      offeredRent: offer.offeredRent ?? offer.property?.price ?? 0,
+      moveInDate: offer.moveInDate ?? '',
+      leaseTerm: offer.leaseTerm ?? 12,
+      progress:
+        normalizeStatus(offer.status) === 'accepted'
+          ? 90
+          : normalizeStatus(offer.status) === 'pending'
+          ? 45
+          : 70 + index * 5,
+    }));
+  }, [offers]);
+
+  const savedProperties = useMemo(
+    () => rentProperties.slice(0, 3),
+    [rentProperties]
+  );
 
   const stats = useMemo(() => ({
     activeApplications: applications.filter(a => a.status === 'pending').length,
@@ -160,7 +240,12 @@ export function TenantDashboard() {
               <CardDescription>Track the status of your rental applications</CardDescription>
             </CardHeader>
             <CardContent>
-              {applications.length === 0 ? (
+              {loadingOffers ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Loader2 className="size-10 mx-auto mb-4 animate-spin" />
+                  Loading applications...
+                </div>
+              ) : applications.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">
                   <FileText className="size-12 mx-auto mb-4 opacity-20" />
                   <p className="mb-2">No applications yet</p>
@@ -170,74 +255,85 @@ export function TenantDashboard() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {applications.map((app) => (
-                    <Card key={app.id}>
-                      <CardContent className="pt-6">
-                        <div className="flex gap-4">
-                          <img
-                            src={app.property?.images[0]}
-                            alt={app.property?.title}
-                            className="w-32 h-24 object-cover rounded-lg"
-                          />
-                          <div className="flex-1 space-y-3">
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <h3 className="mb-1">{app.property?.title}</h3>
-                                <p className="text-sm text-muted-foreground flex items-center gap-1">
-                                  <MapPin className="size-3" />
-                                  {app.property?.location}
-                                </p>
+                  {applications.map((app) => {
+                    const propertyId = app.propertyId || app.property?.id;
+                    return (
+                      <Card key={app.id}>
+                        <CardContent className="pt-6">
+                          <div className="flex gap-4">
+                            <img
+                              src={app.property?.images?.[0] || FALLBACK_IMAGE}
+                              alt={app.property?.title || 'Property'}
+                              className="w-32 h-24 object-cover rounded-lg"
+                            />
+                            <div className="flex-1 space-y-3">
+                              <div className="flex items-start justify-between">
+                                <div>
+                                  <h3 className="mb-1">{app.property?.title || 'Rental application'}</h3>
+                                  <p className="text-sm text-muted-foreground flex items-center gap-1">
+                                    <MapPin className="size-3" />
+                                    {typeof app.property?.location === 'string'
+                                      ? app.property.location
+                                      : app.property?.location?.city || 'Unknown location'}
+                                  </p>
+                                </div>
+                                <Badge
+                                  variant={
+                                    normalizeStatus(app.status) === 'accepted'
+                                      ? 'default'
+                                      : normalizeStatus(app.status) === 'rejected'
+                                      ? 'destructive'
+                                      : 'secondary'
+                                  }
+                                >
+                                  {app.status || 'pending'}
+                                </Badge>
                               </div>
-                              <Badge variant={
-                                app.status === 'accepted' ? 'default' :
-                                app.status === 'rejected' ? 'destructive' : 'secondary'
-                              }>
-                                {app.status}
-                              </Badge>
-                            </div>
 
-                            <div className="grid grid-cols-3 gap-4 text-sm">
-                              <div>
-                                <p className="text-muted-foreground">Offered Rent</p>
-                                <p>£{app.offeredRent}/mo</p>
+                              <div className="grid grid-cols-3 gap-4 text-sm">
+                                <div>
+                                  <p className="text-muted-foreground">Offered Rent</p>
+                                  <p>£{(app.offeredRent ?? 0).toLocaleString()}/mo</p>
+                                </div>
+                                <div>
+                                  <p className="text-muted-foreground">Move-in Date</p>
+                                  <p>{formatDate(app.moveInDate)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-muted-foreground">Lease Term</p>
+                                  <p>{app.leaseTerm} months</p>
+                                </div>
                               </div>
-                              <div>
-                                <p className="text-muted-foreground">Move-in Date</p>
-                                <p>{new Date(app.moveInDate).toLocaleDateString()}</p>
-                              </div>
-                              <div>
-                                <p className="text-muted-foreground">Lease Term</p>
-                                <p>{app.leaseTerm} months</p>
-                              </div>
-                            </div>
 
-                            <div>
-                              <div className="flex justify-between text-sm mb-2">
-                                <span>Application Progress</span>
-                                <span>{app.progress}%</span>
+                              <div>
+                                <div className="flex justify-between text-sm mb-2">
+                                  <span>Application Progress</span>
+                                  <span>{app.progress}%</span>
+                                </div>
+                                <Progress value={app.progress} />
                               </div>
-                              <Progress value={app.progress} />
-                            </div>
 
-                            <div className="flex gap-2">
-                              <Button 
-                                size="sm" 
-                                variant="outline"
-                                onClick={() => navigate(`/property/${app.propertyId}`)}
-                              >
-                                <Eye className="size-4 mr-1" />
-                                View Property
-                              </Button>
-                              <Button size="sm" variant="outline">
-                                <MessageSquare className="size-4 mr-1" />
-                                Message Landlord
-                              </Button>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={!propertyId}
+                                  onClick={() => propertyId && navigate(`/property/${propertyId}`)}
+                                >
+                                  <Eye className="size-4 mr-1" />
+                                  View Property
+                                </Button>
+                                <Button size="sm" variant="outline">
+                                  <MessageSquare className="size-4 mr-1" />
+                                  Message Landlord
+                                </Button>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -318,33 +414,45 @@ export function TenantDashboard() {
               <CardDescription>Stay updated on your applications and new listings</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                {notifications.map((notif) => (
-                  <div
-                    key={notif.id}
-                    className={`p-4 rounded-lg border ${
-                      notif.read ? 'bg-white' : 'bg-blue-50 border-blue-200'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex gap-3">
-                        <Bell className={`size-5 mt-0.5 ${
-                          notif.read ? 'text-gray-400' : 'text-blue-600'
-                        }`} />
-                        <div>
-                          <p className="mb-1">{notif.message}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {new Date(notif.date).toLocaleDateString()}
-                          </p>
+              {loadingNotifications ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Loader2 className="size-10 mx-auto mb-4 animate-spin" />
+                  Loading notifications...
+                </div>
+              ) : notifications.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Bell className="size-12 mx-auto mb-4 opacity-20" />
+                  <p>No alerts yet</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {notifications.map((notif) => (
+                    <div
+                      key={notif.id}
+                      className={`p-4 rounded-lg border ${
+                        notif.read ? 'bg-white' : 'bg-blue-50 border-blue-200'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex gap-3">
+                          <Bell className={`size-5 mt-0.5 ${
+                            notif.read ? 'text-gray-400' : 'text-blue-600'
+                          }`} />
+                          <div>
+                            <p className="mb-1">{notif.message}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatDate(notif.date)}
+                            </p>
+                          </div>
                         </div>
+                        {!notif.read && (
+                          <Badge variant="default" className="ml-2">New</Badge>
+                        )}
                       </div>
-                      {!notif.read && (
-                        <Badge variant="default" className="ml-2">New</Badge>
-                      )}
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

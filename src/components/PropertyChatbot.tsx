@@ -1,8 +1,6 @@
-import { mockProperties } from '../data/mockProperties';
-import { getAllProperties, getPropertyById } from '../utils/localStorage';
 import { Property } from '../types/property';
 import { useState, useEffect, useRef } from 'react';
-import { useLocation, useParams } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
@@ -23,7 +21,7 @@ import {
   Info
 } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
-import { propertiesAPI } from '../utils/api';
+import { propertyStore } from '../services/platformData';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface ChatMessage {
@@ -40,7 +38,7 @@ export function PropertyChatbot() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [allProperties, setAllProperties] = useState<Property[]>(mockProperties);
+  const [allProperties, setAllProperties] = useState<Property[]>([]);
   const [currentProperty, setCurrentProperty] = useState<Property | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
@@ -48,17 +46,22 @@ export function PropertyChatbot() {
 
   // Fetch all properties on mount
   useEffect(() => {
+    let isMounted = true;
     const fetchProperties = async () => {
       try {
-        const localProperties = getAllProperties();
-        setAllProperties([...mockProperties, ...localProperties]);
+        const properties = await propertyStore.getApproved();
+        if (isMounted) {
+          setAllProperties(properties);
+        }
       } catch (error) {
         console.error('Error fetching properties for chatbot:', error);
-        setAllProperties(mockProperties);
       }
     };
 
     fetchProperties();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Fetch current property if on property details page
@@ -68,29 +71,14 @@ export function PropertyChatbot() {
       if (pathParts[1] === 'property' && pathParts[2]) {
         const propertyId = pathParts[2];
         
-        // Try to get property from localStorage
-        const localProperty = getPropertyById(propertyId);
-        
-        if (localProperty) {
-          console.log(`✓ Chatbot found property ${propertyId} in localStorage`);
-          setCurrentProperty(localProperty);
-          return;
-        }
-        
-        // Second, try to find in already loaded properties (faster)
+        // Try to find in already loaded properties (faster)
         const cachedProperty = allProperties.find(p => p.id === propertyId);
         if (cachedProperty) {
           setCurrentProperty(cachedProperty);
           return;
         }
-
-        // Fallback to mock properties
-        const mockProperty = mockProperties.find(p => p.id === propertyId);
-        if (mockProperty) {
-          setCurrentProperty(mockProperty);
-        } else {
-          setCurrentProperty(null);
-        }
+        const remote = await propertyStore.getById(propertyId);
+        setCurrentProperty(remote);
       } else {
         setCurrentProperty(null);
       }

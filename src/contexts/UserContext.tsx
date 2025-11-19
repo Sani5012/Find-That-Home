@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import type { User as SupabaseAuthUser } from '@supabase/supabase-js';
-import { initializeStorage } from '../utils/localStorage';
 import { supabase } from '../lib/supabaseClient';
 
 export type UserRole = 'tenant' | 'landlord' | 'buyer' | 'agent' | 'admin';
@@ -227,22 +226,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const persistCurrentUser = (profile: UserProfile | null) => {
-    if (typeof window === 'undefined') return;
-
-    if (profile) {
-      localStorage.setItem('currentUserId', profile.id);
-      localStorage.setItem('currentUserName', profile.name ?? profile.email);
-      localStorage.setItem('currentUserEmail', profile.email);
-    } else {
-      localStorage.removeItem('currentUserId');
-      localStorage.removeItem('currentUserName');
-      localStorage.removeItem('currentUserEmail');
-    }
-  };
-
   useEffect(() => {
-    initializeStorage();
     let isMounted = true;
 
     const hydrateSession = async () => {
@@ -257,17 +241,14 @@ export function UserProvider({ children }: { children: ReactNode }) {
           const profile = await fetchProfileForAuthUser(authUser);
           if (isMounted) {
             setUser(profile);
-            persistCurrentUser(profile);
           }
         } else if (isMounted) {
           setUser(null);
-          persistCurrentUser(null);
         }
       } catch (error) {
         console.error('Failed to restore session:', error);
         if (isMounted) {
           setUser(null);
-          persistCurrentUser(null);
         }
       } finally {
         if (isMounted) {
@@ -288,14 +269,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
           .then((profile) => {
             if (isMounted) {
               setUser(profile);
-              persistCurrentUser(profile);
             }
           })
           .catch((error) => {
             console.error('Auth state sync failed:', error);
             if (isMounted) {
               setUser(null);
-              persistCurrentUser(null);
             }
           })
           .finally(() => {
@@ -305,7 +284,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
           });
       } else {
         setUser(null);
-        persistCurrentUser(null);
         setLoading(false);
       }
     });
@@ -337,7 +315,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
 
     setUser(profile);
-    persistCurrentUser(profile);
     return profile;
   };
 
@@ -416,7 +393,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
     if (!requiresVerification && data.session?.user) {
       const profile = await fetchProfileForAuthUser(data.session.user, payload.role);
       setUser(profile);
-      persistCurrentUser(profile);
     }
 
     return { requiresVerification };
@@ -425,7 +401,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     await supabase.auth.signOut();
     setUser(null);
-    persistCurrentUser(null);
   };
 
   const updateUser = async (updates: Partial<UserProfile>) => {
@@ -504,7 +479,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
     if (refreshedUser.data.user) {
       const profile = await fetchProfileForAuthUser(refreshedUser.data.user);
       setUser(profile);
-      persistCurrentUser(profile);
     }
   };
 

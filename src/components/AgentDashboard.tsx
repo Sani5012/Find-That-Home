@@ -24,9 +24,9 @@ import {
   Eye
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
-import { getPropertiesByAgent, getAlertsByUser, Property } from '../utils/localStorage';
+import { propertyStore, alertStore } from '../services/platformData';
+import { Property, Alert } from '../types/property';
 import { AddPropertyForm } from './AddPropertyForm';
-import { Alert } from '../utils/localStorage';
 
 export function AgentDashboard() {
   const { user } = useUser();
@@ -46,17 +46,26 @@ export function AgentDashboard() {
     loadAlerts();
   }, [user]);
 
-  const loadProperties = () => {
+  const loadProperties = async () => {
     if (user?.id) {
-      const agentProperties = getPropertiesByAgent(user.id);
-      setProperties(agentProperties);
+      try {
+        const agentProperties = await propertyStore.getByAgent(user.id, user.email);
+        setProperties(agentProperties);
+      } catch (error) {
+        console.error('Failed to load agent properties', error);
+        toast.error('Could not load your properties');
+      }
     }
   };
 
-  const loadAlerts = () => {
+  const loadAlerts = async () => {
     if (user?.id) {
-      const userAlerts = getAlertsByUser(user.id);
-      setAlerts(userAlerts);
+      try {
+        const userAlerts = await alertStore.getByUser(user.id);
+        setAlerts(userAlerts);
+      } catch (error) {
+        console.error('Failed to load alerts', error);
+      }
     }
   };
 

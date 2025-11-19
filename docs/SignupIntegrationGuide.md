@@ -25,8 +25,9 @@ import { supabase } from '../lib/supabaseClient';
 
 1. **User Registration** – `UserContext.signup` wraps `supabase.auth.signUp`. Custom metadata (first/last name, phone, income, preferred property type, and role) is passed through `options.data` so it is available immediately inside Auth.
 2. **Profile Creation** – Immediately after sign-up, we `upsert` the public `users` table with the same metadata. This gives us a reliable, RLS-protected profile record keyed by `auth.uid()`.
-3. **Email Verification** – Supabase sends a confirmation email automatically. The frontend blocks login until `email_confirmed_at` is set. The signup handler returns `{ requiresVerification: boolean }` so components can show the proper CTA.
-4. **Role-based Routing** – After verification/login we read the saved `role` from `users` and send people to the correct dashboard. Admins can always log in even if the UI role selector is different.
+3. **Agent Sync** – When a profile has the `agent` role we also upsert the public `agents` table (columns: `name`, `email`, `phone`, `agency_name`). This keeps dashboards that read from `agents` in sync without any additional code.
+4. **Email Verification** – Supabase sends a confirmation email automatically. The frontend blocks login until `email_confirmed_at` is set. The signup handler returns `{ requiresVerification: boolean }` so components can show the proper CTA.
+5. **Role-based Routing** – After verification/login we read the saved `role` from `users` and send people to the correct dashboard. Admins can always log in even if the UI role selector is different.
 
 ## 4. Login & Session Management
 

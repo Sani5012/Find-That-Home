@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
 import { Search, Star, MapPin, Building2, Home, ArrowRight, CheckCircle2, Sparkles, TrendingUp, Navigation as NavIcon } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
-import { getApprovedProperties } from '../utils/localStorage';
+import { propertyStore } from '../services/platformData';
 import { ImageWithFallback } from './Fallback/ImageWithFallback';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { LocationSearchDropdown } from './LocationSearchDropdown';
@@ -26,8 +26,21 @@ export function HomePage() {
 
   // Load featured properties
   useEffect(() => {
-    const properties = getApprovedProperties();
-    setFeaturedProperties(properties.slice(0, 4));
+    let isMounted = true;
+    const load = async () => {
+      try {
+        const properties = await propertyStore.getApproved();
+        if (isMounted) {
+          setFeaturedProperties(properties.slice(0, 4));
+        }
+      } catch (error) {
+        console.error('Failed to load featured properties', error);
+      }
+    };
+    load();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const handleSearch = () => {

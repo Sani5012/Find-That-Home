@@ -8,13 +8,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Input } from './ui/input';
 import { LocationSearchDropdown } from './LocationSearchDropdown';
 import { AffordabilityCalculator } from './AffordabilityCalculator';
-import { getAllProperties } from '../utils/localStorage';
+import { offerStore, propertyStore } from '../services/platformData';
 import { useUser } from '../contexts/UserContext';
 import { ImageWithFallback } from './Fallback/ImageWithFallback';
-import { 
+import { RentalOffer } from '../types/property';
+import {
   Home, TrendingUp, DollarSign, Eye, Heart, ShoppingCart, FileText,
   CheckCircle, Clock, MapPin, Calculator, Bell, AlertCircle, Search,
-  Navigation, Building2, Sparkles, ArrowRight, Star, BarChart3
+  Navigation, Building2, Sparkles, ArrowRight, Star, BarChart3, Loader2
 } from 'lucide-react';
 
 export function BuyerDashboard() {
@@ -25,40 +26,66 @@ export function BuyerDashboard() {
 
   // Load properties
   useEffect(() => {
-    const allProps = getAllProperties();
-    const approvedProps = allProps.filter(p => p.status === 'approved' || !p.status);
-    setProperties(approvedProps);
+    let isMounted = true;
+    const load = async () => {
+      try {
+        const approvedProps = await propertyStore.getApproved();
+        if (isMounted) {
+          setProperties(approvedProps);
+        }
+      } catch (error) {
+        console.error('Failed to load buyer properties', error);
+      }
+    };
+
+    load();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // Mock data for buyer offers
-  const [offers] = useState([
-    {
-      id: 'offer-1',
-      propertyId: '7',
-      property: properties[0],
-      offeredPrice: 1200000,
-      offerDate: '2025-10-26',
-      status: 'pending',
-      expiryDate: '2025-11-02',
-    },
-    {
-      id: 'offer-2',
-      propertyId: '8',
-      property: properties[1],
-      offeredPrice: 850000,
-      offerDate: '2025-10-20',
-      status: 'accepted',
-      expiryDate: '2025-10-27',
-      completionProgress: 45,
-    },
-  ]);
+  const [offers, setOffers] = useState<RentalOffer[]>([]);
+  const [loadingOffers, setLoadingOffers] = useState(false);
 
-  const [viewedProperties] = useState(
-    properties.filter(p => p.listingType === 'sale').slice(0, 4)
+  useEffect(() => {
+    let isMounted = true;
+    if (!user?.id) {
+      setOffers([]);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    const loadOffers = async () => {
+      try {
+        setLoadingOffers(true);
+        const data = await offerStore.getByUser(user.id);
+        if (isMounted) {
+          setOffers(data);
+        }
+      } catch (error) {
+        console.error('Failed to load buyer offers', error);
+      } finally {
+        if (isMounted) {
+          setLoadingOffers(false);
+        }
+      }
+    };
+
+    loadOffers();
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.id]);
+
+  const viewedProperties = useMemo(
+    () => properties.filter(p => p.listingType === 'sale').slice(0, 4),
+    [properties]
   );
 
-  const [savedProperties] = useState(
-    properties.filter(p => p.listingType === 'sale').slice(0, 3)
+  const savedProperties = useMemo(
+    () => properties.filter(p => p.listingType === 'sale').slice(0, 3),
+    [properties]
   );
 
   const stats = useMemo(() => ({
@@ -88,6 +115,25 @@ export function BuyerDashboard() {
       return `${property.location.address || ''}, ${property.location.city || ''}`.trim();
     }
     return 'Location not specified';
+  };
+
+  const formatOfferAmount = (offer: RentalOffer) => {
+    const amount = offer.offeredPrice ?? offer.offeredRent ?? offer.property?.price;
+    if (!amount) {
+      return '—';
+    }
+    return `£${amount.toLocaleString()}`;
+  };
+
+  const formatOfferDate = (offer: RentalOffer) => {
+    if (!offer.createdAt) {
+      return '—';
+    }
+    try {
+      return new Date(offer.createdAt).toLocaleDateString();
+    } catch (error) {
+      return offer.createdAt;
+    }
   };
 
   return (
@@ -316,7 +362,12 @@ export function BuyerDashboard() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {offers.length === 0 ? (
+                {loadingOffers ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Loader2 className="h-6 w-6 mx-auto mb-3 animate-spin" />
+                    Loading your offers...
+                  </div>
+                ) : offers.length === 0 ? (
                   <div className="text-center py-12">
                     <AlertCircle className="h-16 w-16 mx-auto mb-4 text-gray-300" />
                     <p className="text-gray-500 mb-4">You haven't made any offers yet</p>
@@ -326,7 +377,9 @@ export function BuyerDashboard() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {offers.map(offer => (
+                    {offers.map(offer => {
+                      const propertyId = offer.propertyId || offer.property?.id || '';
+                      return (
                       <Card key={offer.id} className="border-2">
                         <CardContent className="pt-6">
                           <div className="flex items-start justify-between mb-4">
@@ -334,52 +387,47 @@ export function BuyerDashboard() {
                               <h3 className="mb-1">{offer.property?.title || 'Property'}</h3>
                               <p className="text-sm text-gray-600 flex items-center gap-1">
                                 <MapPin className="h-3 w-3" />
-                                {typeof offer.property?.location === 'string' 
-                                  ? offer.property.location 
+                                {typeof offer.property?.location === 'string'
+                                  ? offer.property.location
                                   : offer.property?.location?.city || 'Unknown'}
                               </p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {offer.offerType ? offer.offerType.toUpperCase() : 'OFFER'}
+                              </p>
                             </div>
-                            <Badge 
+                            <Badge
                               variant={offer.status === 'accepted' ? 'default' : 'secondary'}
                               className={offer.status === 'accepted' ? 'bg-green-500' : 'bg-orange-500'}
                             >
                               {offer.status}
                             </Badge>
                           </div>
-                          
+
                           <div className="grid grid-cols-2 gap-4 mb-4">
                             <div>
-                              <p className="text-xs text-gray-500">Your Offer</p>
-                              <p className="text-lg">£{offer.offeredPrice.toLocaleString()}</p>
+                              <p className="text-xs text-gray-500">Offer Amount</p>
+                              <p className="text-lg">{formatOfferAmount(offer)}</p>
                             </div>
                             <div>
-                              <p className="text-xs text-gray-500">Offer Date</p>
-                              <p className="text-lg">{offer.offerDate}</p>
+                              <p className="text-xs text-gray-500">Submitted</p>
+                              <p className="text-lg">{formatOfferDate(offer)}</p>
                             </div>
                           </div>
 
-                          {offer.status === 'accepted' && offer.completionProgress !== undefined && (
-                            <div className="mb-4">
-                              <div className="flex justify-between text-sm mb-2">
-                                <span>Completion Progress</span>
-                                <span>{offer.completionProgress}%</span>
-                              </div>
-                              <Progress value={offer.completionProgress} className="h-2" />
-                            </div>
-                          )}
-
                           <div className="flex gap-2">
-                            <Button 
-                              variant="outline" 
+                            <Button
+                              variant="outline"
                               className="flex-1"
-                              onClick={() => navigate(`/property/${offer.propertyId}`)}
+                              disabled={!propertyId}
+                              onClick={() => propertyId && navigate(`/property/${propertyId}`)}
                             >
                               View Property
                             </Button>
                             {offer.status === 'accepted' && (
-                              <Button 
+                              <Button
                                 className="flex-1"
-                                onClick={() => navigate(`/purchase/${offer.propertyId}`)}
+                                disabled={!propertyId}
+                                onClick={() => propertyId && navigate(`/purchase/${propertyId}`)}
                               >
                                 Continue Purchase
                               </Button>
@@ -387,7 +435,8 @@ export function BuyerDashboard() {
                           </div>
                         </CardContent>
                       </Card>
-                    ))}
+                    );
+                    })}
                   </div>
                 )}
               </CardContent>

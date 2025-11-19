@@ -144,16 +144,30 @@ export interface UserPreferences {
   gpsAlerts?: boolean;
 }
 
+export type RentalOfferStatus =
+  | 'pending'
+  | 'accepted'
+  | 'rejected'
+  | 'countered'
+  | 'completed'
+  | 'in-progress'
+  | 'submitted';
+
 export interface RentalOffer {
   id: string;
   propertyId: string;
   userId: string;
-  offeredRent: number;
-  moveInDate: string;
-  leaseTerm: number; // months
-  message: string;
-  status: 'pending' | 'accepted' | 'rejected';
+  status: RentalOfferStatus;
+  offerType?: 'rent' | 'sale' | 'purchase' | string;
+  offeredRent?: number;
+  offeredPrice?: number;
+  moveInDate?: string;
+  leaseTerm?: number; // months
+  message?: string;
   createdAt: string;
+  property?: Property;
+  buyerName?: string;
+  buyerEmail?: string;
 }
 
 export interface RentalApplication {

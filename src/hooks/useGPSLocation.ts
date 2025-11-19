@@ -27,18 +27,7 @@ const haversineDistance = (lat1: number, lng1: number, lat2: number, lng2: numbe
 };
 
 export function useGPSLocation(): UseGPSLocationResult {
-  const [location, setLocation] = useState<GPSLocation | null>(() => {
-    // Try to load cached location from localStorage
-    const cached = localStorage.getItem('userLocation');
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  });
+  const [location, setLocation] = useState<GPSLocation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [watchId, setWatchId] = useState<number | null>(null);
@@ -54,8 +43,6 @@ export function useGPSLocation(): UseGPSLocationResult {
     setError(null);
     setLoading(false);
     
-    // Cache location in localStorage
-    localStorage.setItem('userLocation', JSON.stringify(newLocation));
   }, []);
 
   const handleError = useCallback((error: GeolocationPositionError) => {

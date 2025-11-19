@@ -135,9 +135,57 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     loadData();
-    loadActivityLogs();
-    calculateAnalytics();
   }, []);
+
+  const computeAnalytics = (props: Property[]) => {
+    if (!props.length) {
+      return {
+        totalRevenue: 0,
+        avgPropertyPrice: 0,
+        mostActiveCity: 'N/A',
+        growthRate: 0,
+        conversionRate: 0,
+      };
+    }
+
+    const totalRevenue = props.reduce((sum, property) => sum + (property.price || 0), 0);
+    const avgPropertyPrice = totalRevenue / props.length;
+
+    const cityCount: Record<string, number> = {};
+    props.forEach(property => {
+      const city = property.location && typeof property.location === 'object'
+        ? property.location.city || 'Unknown'
+        : property.city || 'Unknown';
+      cityCount[city] = (cityCount[city] || 0) + 1;
+    });
+    const mostActiveCity = Object.keys(cityCount).sort((a, b) => cityCount[b] - cityCount[a])[0] || 'N/A';
+
+    const now = new Date();
+    const thisMonth = props.filter(property => {
+      if (!property.createdAt) return false;
+      const created = new Date(property.createdAt);
+      return created.getMonth() === now.getMonth() && created.getFullYear() === now.getFullYear();
+    }).length;
+
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonth = props.filter(property => {
+      if (!property.createdAt) return false;
+      const created = new Date(property.createdAt);
+      return created.getMonth() === lastMonthDate.getMonth() && created.getFullYear() === lastMonthDate.getFullYear();
+    }).length;
+
+    const growthRate = lastMonth > 0 ? ((thisMonth - lastMonth) / lastMonth) * 100 : thisMonth > 0 ? 100 : 0;
+    const approved = props.filter(property => property.approvalStatus === 'approved').length;
+    const conversionRate = (approved / props.length) * 100;
+
+    return {
+      totalRevenue,
+      avgPropertyPrice,
+      mostActiveCity,
+      growthRate,
+      conversionRate,
+    };
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -149,7 +197,9 @@ export default function AdminDashboard() {
       ]);
 
       setUsers(usersData.users || []);
-      setProperties(propertiesData.properties || []);
+      const loadedProperties = propertiesData.properties || [];
+      setProperties(loadedProperties);
+      setAnalytics(computeAnalytics(loadedProperties));
       setStats(statsData.stats || null);
     } catch (error: any) {
       console.error('Failed to load admin data:', error);
@@ -159,76 +209,18 @@ export default function AdminDashboard() {
     }
   };
 
-  const loadActivityLogs = () => {
-    const logs = JSON.parse(localStorage.getItem('activityLogs') || '[]');
-    setActivityLogs(logs.slice(0, 50)); // Last 50 activities
-  };
-
   const addActivityLog = (action: string, details: string) => {
-    const currentUserId = localStorage.getItem('currentUserId') || 'system';
-    const currentUserName = localStorage.getItem('currentUserName') || 'Admin';
-    
-    const log: ActivityLog = {
-      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      userId: currentUserId,
-      userName: currentUserName,
-      action,
-      details,
-      timestamp: new Date().toISOString(),
-    };
-
-    const logs = JSON.parse(localStorage.getItem('activityLogs') || '[]');
-    logs.unshift(log);
-    localStorage.setItem('activityLogs', JSON.stringify(logs.slice(0, 100))); // Keep last 100
-    loadActivityLogs();
-  };
-
-  const calculateAnalytics = () => {
-    const props = JSON.parse(localStorage.getItem('properties') || '[]');
-    
-    if (props.length === 0) {
-      return;
-    }
-
-    const totalRevenue = props.reduce((sum: number, p: any) => sum + (p.price || 0), 0);
-    const avgPropertyPrice = totalRevenue / props.length;
-
-    // Calculate most active city
-    const cityCount: Record<string, number> = {};
-    props.forEach((p: any) => {
-      const city = p.location?.city || p.city || 'Unknown';
-      cityCount[city] = (cityCount[city] || 0) + 1;
-    });
-    const mostActiveCity = Object.keys(cityCount).reduce((a, b) => 
-      cityCount[a] > cityCount[b] ? a : b, 'N/A'
-    );
-
-    // Calculate growth rate (comparing this month vs last month)
-    const now = new Date();
-    const thisMonth = props.filter((p: any) => {
-      const created = new Date(p.createdAt);
-      return created.getMonth() === now.getMonth() && created.getFullYear() === now.getFullYear();
-    }).length;
-
-    const lastMonth = props.filter((p: any) => {
-      const created = new Date(p.createdAt);
-      const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      return created.getMonth() === lastMonthDate.getMonth() && created.getFullYear() === lastMonthDate.getFullYear();
-    }).length;
-
-    const growthRate = lastMonth > 0 ? ((thisMonth - lastMonth) / lastMonth) * 100 : 0;
-
-    // Conversion rate (approved / total)
-    const approved = props.filter((p: any) => p.approvalStatus === 'approved').length;
-    const conversionRate = (approved / props.length) * 100;
-
-    setAnalytics({
-      totalRevenue,
-      avgPropertyPrice,
-      mostActiveCity,
-      growthRate,
-      conversionRate,
-    });
+    setActivityLogs(prev => [
+      {
+        id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        userId: 'system',
+        userName: 'Admin',
+        action,
+        details,
+        timestamp: new Date().toISOString(),
+      },
+      ...prev,
+    ].slice(0, 50));
   };
 
   const handleApproveProperty = async (propertyId: string) => {
@@ -238,7 +230,6 @@ export default function AdminDashboard() {
       addActivityLog('Approved Property', `Approved property: ${property?.title || propertyId}`);
       toast.success('Property approved successfully');
       loadData();
-      calculateAnalytics();
     } catch (error: any) {
       console.error('Failed to approve property:', error);
       toast.error('Failed to approve property: ' + error.message);
@@ -257,7 +248,6 @@ export default function AdminDashboard() {
       setPropertyToReject(null);
       setRejectionReason('');
       loadData();
-      calculateAnalytics();
     } catch (error: any) {
       console.error('Failed to reject property:', error);
       toast.error('Failed to reject property: ' + error.message);
@@ -273,7 +263,6 @@ export default function AdminDashboard() {
       setDeleteDialogOpen(false);
       setDeleteTarget(null);
       loadData();
-      calculateAnalytics();
     } catch (error: any) {
       console.error('Failed to delete property:', error);
       toast.error('Failed to delete property: ' + error.message);
@@ -303,7 +292,6 @@ export default function AdminDashboard() {
       setDeleteDialogOpen(false);
       setDeleteTarget(null);
       loadData();
-      calculateAnalytics();
     } catch (error: any) {
       console.error('Failed to clear all data:', error);
       toast.error('Failed to clear all data: ' + error.message);
@@ -417,10 +405,10 @@ export default function AdminDashboard() {
         <AlertDescription className="text-blue-800">
           <div className="flex items-center justify-between">
             <span>
-              <strong>Storage System:</strong> Running on localStorage (Browser-based) - All Supabase/Backend removed
+              <strong>Storage System:</strong> Connected to Supabase - live production data
             </span>
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               size="sm"
               onClick={() => window.open('/SYSTEM_INFO.md', '_blank')}
               className="text-blue-600 hover:text-blue-700"
@@ -978,7 +966,7 @@ export default function AdminDashboard() {
                 <div className="space-y-2 text-sm">
                   <p><span className="font-medium">Platform:</span> Find that Home</p>
                   <p><span className="font-medium">Version:</span> 1.0.0</p>
-                  <p><span className="font-medium">Storage:</span> localStorage (Browser-based)</p>
+                  <p><span className="font-medium">Storage:</span> Supabase Cloud Database</p>
                   <p><span className="font-medium">Last Updated:</span> {new Date().toLocaleDateString()}</p>
                 </div>
               </div>

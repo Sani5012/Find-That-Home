@@ -3,8 +3,8 @@ import { MapPin, Navigation, Loader2, TrendingUp } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
-import { getAllProperties } from '../utils/localStorage';
 import { Property } from '../types/property';
+import { propertyStore } from '../services/platformData';
 import { useNavigate } from 'react-router-dom';
 
 interface LocationSearchDropdownProps {
@@ -23,10 +23,22 @@ export function LocationSearchDropdown({ onPropertySelect }: LocationSearchDropd
 
   // Load all properties
   useEffect(() => {
-    const properties = getAllProperties();
-    // Only show approved properties
-    const approvedProperties = properties.filter(p => p.status === 'approved' || !p.status);
-    setAllProperties(approvedProperties);
+    let isMounted = true;
+    const load = async () => {
+      try {
+        const properties = await propertyStore.getApproved();
+        if (isMounted) {
+          setAllProperties(properties);
+        }
+      } catch (error) {
+        console.error('Failed to load properties', error);
+      }
+    };
+
+    load();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Handle click outside to close dropdown

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -14,8 +14,8 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, 
   DialogHeader, DialogTitle 
 } from './ui/dialog';
-import { mockProperties } from '../data/mockProperties';
-import { PurchaseOffer, PurchaseTransaction as Transaction } from '../types/property';
+import { PurchaseOffer, PurchaseTransaction as Transaction, Property } from '../types/property';
+import { propertyStore } from '../services/platformData';
 import { 
   Home, DollarSign, FileText, CheckCircle2, Clock, Upload, 
   AlertCircle, TrendingUp, Shield, Calendar, ArrowRight,
@@ -26,7 +26,35 @@ import { toast } from 'sonner@2.0.3';
 export function PurchaseTransaction() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const property = mockProperties.find(p => p.id === id && p.listingType === 'sale');
+  const [property, setProperty] = useState<Property | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!id) {
+      setProperty(null);
+      setLoading(false);
+      return;
+    }
+
+    const loadProperty = async () => {
+      setLoading(true);
+      try {
+        const fetched = await propertyStore.getById(id);
+        if (fetched && (fetched.listingType || fetched.type) === 'sale') {
+          setProperty(fetched);
+        } else {
+          setProperty(null);
+        }
+      } catch (error) {
+        console.error('Failed to load property', error);
+        setProperty(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadProperty();
+  }, [id]);
 
   const [currentTab, setCurrentTab] = useState('offer');
   
@@ -119,6 +147,14 @@ export function PurchaseTransaction() {
 
   const [showSigningDialog, setShowSigningDialog] = useState(false);
   const [documentToSign, setDocumentToSign] = useState('');
+
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="text-center text-muted-foreground">Loading property details...</div>
+      </div>
+    );
+  }
 
   if (!property) {
     return (

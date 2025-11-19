@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -13,20 +13,33 @@ import {
   BarChart3, Activity
 } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
-import { getPropertiesByAgent, getUsers } from '../utils/localStorage';
+import { propertyStore } from '../services/platformData';
+import { Property } from '../types/property';
 
 export function AgentProfileView() {
   const navigate = useNavigate();
   const { user } = useUser();
   const [activeTab, setActiveTab] = useState('overview');
+  const [properties, setProperties] = useState<Property[]>([]);
 
-  // Get agent's properties
-  const properties = useMemo(() => {
-    if (user?.id) {
-      return getPropertiesByAgent(user.id);
-    }
-    return [];
-  }, [user?.id]);
+  useEffect(() => {
+    if (!user?.id) return;
+    let isMounted = true;
+    const load = async () => {
+      try {
+        const data = await propertyStore.getByAgent(user.id, user.email);
+        if (isMounted) {
+          setProperties(data);
+        }
+      } catch (error) {
+        console.error('Failed to load agent properties', error);
+      }
+    };
+    load();
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.id, user?.email]);
 
   // Calculate stats
   const stats = useMemo(() => {

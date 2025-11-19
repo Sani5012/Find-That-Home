@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -11,17 +11,42 @@ import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Checkbox } from './ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { mockProperties } from '../data/mockProperties';
-import { 
-  FileText, CheckCircle2, Clock, DollarSign, Upload, CreditCard, 
-  Shield, Users, Home, ArrowRight, Check, AlertCircle 
+import {
+  FileText, CheckCircle2, Clock, DollarSign, Upload, CreditCard,
+  Shield, Users, Home, ArrowRight, Check, AlertCircle
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
+import { propertyStore } from '../services/platformData';
+import { Property } from '../types/property';
 
 export function LegalEngagement() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const property = mockProperties.find(p => p.id === id);
+  const [property, setProperty] = useState<Property | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!id) {
+      setProperty(null);
+      setLoading(false);
+      return;
+    }
+
+    const loadProperty = async () => {
+      setLoading(true);
+      try {
+        const fetched = await propertyStore.getById(id);
+        setProperty(fetched);
+      } catch (error) {
+        console.error('Failed to load property', error);
+        setProperty(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadProperty();
+  }, [id]);
   
   // Application state
   const [currentStep, setCurrentStep] = useState(1);
@@ -68,6 +93,14 @@ export function LegalEngagement() {
   const [firstMonthPaid, setFirstMonthPaid] = useState(false);
   const [directDebitSetup, setDirectDebitSetup] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'bank-transfer' | 'card'>('bank-transfer');
+
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-12 text-center">
+        <p className="text-muted-foreground">Loading property details...</p>
+      </div>
+    );
+  }
 
   if (!property) {
     return (

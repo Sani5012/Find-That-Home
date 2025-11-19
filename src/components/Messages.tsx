@@ -59,20 +59,6 @@ export function Messages() {
       return;
     }
     
-    const token = localStorage.getItem('authToken');
-    console.log('Loading conversations - has token:', !!token);
-    
-    if (!token) {
-      console.error('No auth token found in localStorage');
-      if (!silent) {
-        toast.error('Authentication required. Please sign in.');
-        setTimeout(() => {
-          window.location.href = '/login';
-        }, 1500);
-      }
-      return;
-    }
-    
     try {
       if (!silent) setLoading(true);
       const { conversations: fetchedConversations } = await messagingAPI.getConversations();
@@ -81,18 +67,7 @@ export function Messages() {
       console.error('Load conversations error:', error);
       
       // Check if it's an authentication error
-      if (error.message?.includes('Unauthorized') || error.message?.includes('Invalid or expired token')) {
-        console.log('Authentication failed, redirecting to login');
-        localStorage.removeItem('authToken');
-        if (!silent) {
-          toast.error('Your session has expired. Please sign in again.');
-          setTimeout(() => {
-            window.location.href = '/login';
-          }, 1500);
-        }
-      } else {
-        if (!silent) toast.error('Failed to load conversations');
-      }
+      if (!silent) toast.error('Failed to load conversations');
     } finally {
       if (!silent) setLoading(false);
     }
@@ -114,8 +89,6 @@ export function Messages() {
   const totalUnread = conversations.reduce((sum, conv) => sum + getUnreadCount(conv), 0);
 
   if (!isAuthenticated || !user) {
-    const hasToken = !!localStorage.getItem('authToken');
-    
     return (
       <div className="container mx-auto px-4 py-8">
         <Card className="max-w-6xl mx-auto">
@@ -124,11 +97,6 @@ export function Messages() {
             <div className="text-center">
               <p className="text-xl mb-2">Please Sign In</p>
               <p className="text-gray-500 mb-4">You need to be signed in to view messages</p>
-              <div className="text-xs text-gray-400 mb-4">
-                <p>Auth Status: {isAuthenticated ? 'Authenticated' : 'Not Authenticated'}</p>
-                <p>User: {user ? user.email : 'None'}</p>
-                <p>Token: {hasToken ? 'Present' : 'Missing'}</p>
-              </div>
               <Button onClick={() => window.location.href = '/login'}>
                 Sign In
               </Button>

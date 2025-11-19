@@ -19,11 +19,11 @@ import {
 } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
 import { toast } from 'sonner@2.0.3';
-import { updateUser as updateUserInStorage } from '../utils/localStorage';
+import { supabase } from '../lib/supabaseClient';
 
 export function AdminProfileView() {
   const navigate = useNavigate();
-  const { user, logout, updateUser } = useUser();
+  const { user, logout } = useUser();
   const [isEditingPassword, setIsEditingPassword] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -47,13 +47,8 @@ export function AdminProfileView() {
       return;
     }
 
-    if (currentPassword !== user.password) {
-      toast.error('Current password is incorrect');
-      return;
-    }
-
-    if (newPassword.length < 6) {
-      toast.error('New password must be at least 6 characters long');
+    if (newPassword.length < 8) {
+      toast.error('New password must be at least 8 characters long');
       return;
     }
 
@@ -65,21 +60,26 @@ export function AdminProfileView() {
     setIsUpdating(true);
 
     try {
-      // Update password in localStorage
-      const updatedUser = updateUserInStorage(user.id, { password: newPassword });
-      
-      if (updatedUser) {
-        // Update context
-        updateUser({ password: newPassword });
-        
-        toast.success('Password updated successfully');
-        setIsEditingPassword(false);
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-      } else {
-        throw new Error('Failed to update password');
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword,
+      });
+
+      if (verifyError) {
+        toast.error('Current password is incorrect');
+        return;
       }
+
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+
+      toast.success('Password updated successfully');
+      setIsEditingPassword(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
     } catch (error) {
       console.error('Password update error:', error);
       toast.error('Failed to update password. Please try again.');

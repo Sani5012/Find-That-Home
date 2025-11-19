@@ -1,7 +1,12 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import type { PostgrestError, User as SupabaseAuthUser, Session } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabaseClient';
-import { initializeStorage } from '../utils/localStorage';
+import type { User as StoredUser } from '../utils/localStorage';
+import {
+  createUser as createStoredUser,
+  getUserByEmail,
+  getUserById,
+  initializeStorage,
+  updateUser as updateStoredUser,
+} from '../utils/localStorage';
 
 export type UserRole = 'tenant' | 'landlord' | 'buyer' | 'agent' | 'admin';
 
@@ -42,274 +47,131 @@ interface UserContextType {
   loading: boolean;
 }
 
-interface UserTableRow {
-  id: string;
-  email: string;
-  role: UserRole;
-  first_name?: string | null;
-  last_name?: string | null;
-  phone?: string | null;
-  income?: number | null;
-  income_type?: 'monthly' | 'yearly' | null;
-  preferred_property_type?: 'rent' | 'buy' | null;
-  created_at?: string;
-}
-
 const UserContext = createContext<UserContextType | undefined>(undefined);
+
+const mapStoredUserToProfile = (stored: StoredUser): UserProfile => {
+  const computedName = `${stored.firstName || ''} ${stored.lastName || ''}`.trim();
+
+  return {
+    id: stored.id,
+    email: stored.email,
+    role: stored.role,
+    name: stored.name || computedName || stored.email,
+    firstName: stored.firstName,
+    lastName: stored.lastName,
+    phone: stored.phone,
+    income: stored.income,
+    incomeType: stored.incomeType,
+    preferredPropertyType: stored.preferredPropertyType,
+    createdAt: stored.createdAt,
+  };
+};
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [profileTableAvailable, setProfileTableAvailable] = useState(true);
-
-  const getEmailRedirectUrl = () => {
-    const configuredUrl = import.meta.env.VITE_APP_URL;
-    if (configuredUrl) {
-      return `${configuredUrl.replace(/\/$/, '')}/login`;
-    }
-
-    if (typeof window !== 'undefined') {
-      return `${window.location.origin}/login`;
-    }
-
-    return undefined;
-  };
 
   useEffect(() => {
     initializeStorage();
 
-    const initializeSession = async () => {
-      try {
-        const { data } = await supabase.auth.getSession();
-        if (data.session?.user) {
-          const profile = await loadUserProfile(data.session.user);
-          setUser(profile);
-        }
-      } catch (error) {
-        handlePossibleNetworkError(error, 'restoring your session');
-        console.error('Failed to restore session', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    initializeSession();
-
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      await handleSessionChange(session);
-    });
-
-    return () => {
-      listener.subscription.unsubscribe();
-    };
-  }, []);
-
-  const handleSessionChange = async (session: Session | null) => {
-    if (!session?.user) {
-      setUser(null);
+    if (typeof window === 'undefined') {
+      setLoading(false);
       return;
     }
 
-    try {
-      const profile = await loadUserProfile(session.user);
-      setUser(profile);
-    } catch (error) {
-      console.error('Failed to refresh profile', error);
-    }
-  };
-
-  const loadUserProfile = async (authUser: SupabaseAuthUser): Promise<UserProfile> => {
-    try {
-      const { data: profileData, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', authUser.id)
-        .maybeSingle();
-
-      if (error && error.code !== 'PGRST116') {
-        console.error('Failed to load profile', error);
-        throw error;
+    const storedId = localStorage.getItem('currentUserId');
+    if (storedId) {
+      const storedUser = getUserById(storedId);
+      if (storedUser) {
+        setUser(mapStoredUserToProfile(storedUser));
+      } else {
+        localStorage.removeItem('currentUserId');
       }
-
-      return mapProfile(authUser, profileData || undefined);
-    } catch (error) {
-      handlePossibleNetworkError(error, 'loading your profile');
-      throw error;
     }
-  };
 
-  const mapProfile = (authUser: SupabaseAuthUser, profile?: UserTableRow): UserProfile => {
-    const firstName = profile?.first_name || (authUser.user_metadata?.first_name as string | undefined) || '';
-    const lastName = profile?.last_name || (authUser.user_metadata?.last_name as string | undefined) || '';
-    const nameFromMetadata =
-      (authUser.user_metadata?.full_name as string | undefined) ||
-      (authUser.user_metadata?.name as string | undefined);
-    const metadataIncomeType =
-      (authUser.user_metadata?.incomeType as 'monthly' | 'yearly' | undefined) ||
-      (authUser.user_metadata?.income_type as 'monthly' | 'yearly' | undefined);
-    const metadataPreferredPropertyType =
-      (authUser.user_metadata?.preferredPropertyType as 'rent' | 'buy' | undefined) ||
-      (authUser.user_metadata?.preferred_property_type as 'rent' | 'buy' | undefined);
-    const computedName = `${firstName} ${lastName}`.trim();
-
-    return {
-      id: authUser.id,
-      email: authUser.email || profile?.email || '',
-      role: (profile?.role || (authUser.user_metadata?.role as UserRole) || 'tenant'),
-      name: computedName || nameFromMetadata || profile?.email || authUser.email || undefined,
-      firstName: firstName || undefined,
-      lastName: lastName || undefined,
-      phone: profile?.phone || (authUser.user_metadata?.phone as string | undefined),
-      income: profile?.income ?? (authUser.user_metadata?.income as number | undefined),
-      incomeType: profile?.income_type || metadataIncomeType || undefined,
-      preferredPropertyType: profile?.preferred_property_type || metadataPreferredPropertyType || undefined,
-      createdAt: profile?.created_at || authUser.created_at,
-    };
-  };
+    setLoading(false);
+  }, []);
 
   const login = async (email: string, password: string, role: UserRole) => {
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const storedUser = getUserByEmail(email);
 
-      if (error) {
-        throw error;
-      }
-
-      if (!data.user) {
-        throw new Error('Login failed');
-      }
-
-      if (!data.user.email_confirmed_at) {
-        await supabase.auth.signOut();
-        throw new Error('Email not confirmed');
-      }
-
-      const profile = await loadUserProfile(data.user);
-
-      if (profile.role !== 'admin' && profile.role !== role) {
-        await supabase.auth.signOut();
-        throw new Error(`This account is registered as a ${profile.role}, not a ${role}`);
-      }
-
-      setUser(profile);
-      return profile;
-    } catch (error) {
-      handlePossibleNetworkError(error, 'logging in');
-      throw error;
+    if (!storedUser || storedUser.password !== password) {
+      throw new Error('Invalid email or password');
     }
+
+    if (storedUser.role !== 'admin' && storedUser.role !== role) {
+      throw new Error(`This account is registered as a ${storedUser.role}, not a ${role}`);
+    }
+
+    localStorage.setItem('currentUserId', storedUser.id);
+    const profile = mapStoredUserToProfile(storedUser);
+    setUser(profile);
+    return profile;
   };
 
   const signup = async (payload: SignupPayload) => {
-    const { email, password, firstName, lastName, phone, role, income, incomeType, preferredPropertyType } = payload;
-
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/login`,
-          data: {
-            first_name: firstName,
-            last_name: lastName,
-            phone,
-            role,
-            income,
-            income_type: incomeType,
-            preferred_property_type: preferredPropertyType,
-          },
-        },
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      if (data.user) {
-        const { error: profileError } = await supabase.from('users').upsert({
-          id: data.user.id,
-          email,
-          first_name: firstName,
-          last_name: lastName,
-          phone,
-          role,
-          income,
-          income_type: incomeType,
-          preferred_property_type: preferredPropertyType,
-        });
-
-        if (profileError) {
-          console.error('Failed to persist profile', profileError);
-          throw profileError;
-        }
-      }
-
-      if (data.session?.user?.email_confirmed_at) {
-        const profile = await loadUserProfile(data.session.user);
-        setUser(profile);
-        return { requiresVerification: false };
-      }
-
-      return { requiresVerification: true };
-    } catch (error) {
-      handlePossibleNetworkError(error, 'signing up');
-      throw error;
+    const existingUser = getUserByEmail(payload.email);
+    if (existingUser) {
+      throw new Error('This email is already registered. Please sign in instead.');
     }
+
+    const computedName = `${payload.firstName} ${payload.lastName}`.trim() || payload.email;
+    const newUser = createStoredUser({
+      email: payload.email,
+      password: payload.password,
+      name: computedName,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      phone: payload.phone,
+      role: payload.role,
+      income: payload.income,
+      incomeType: payload.incomeType,
+      preferredPropertyType: payload.preferredPropertyType,
+    });
+
+    localStorage.setItem('currentUserId', newUser.id);
+    const profile = mapStoredUserToProfile(newUser);
+    setUser(profile);
+
+    return { requiresVerification: false };
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    localStorage.removeItem('currentUserId');
     setUser(null);
   };
 
   const updateUser = async (updates: Partial<UserProfile>) => {
     if (!user) return;
 
-    const payload: Record<string, any> = {};
-    if (updates.firstName !== undefined) payload.first_name = updates.firstName;
-    if (updates.lastName !== undefined) payload.last_name = updates.lastName;
-    if (updates.phone !== undefined) payload.phone = updates.phone;
-    if (updates.role !== undefined) payload.role = updates.role;
-    if (updates.income !== undefined) payload.income = updates.income;
-    if (updates.incomeType !== undefined) payload.income_type = updates.incomeType;
-    if (updates.preferredPropertyType !== undefined) payload.preferred_property_type = updates.preferredPropertyType;
+    const updatesForStorage: Record<string, unknown> = {};
+
+    if (updates.firstName !== undefined) updatesForStorage.firstName = updates.firstName;
+    if (updates.lastName !== undefined) updatesForStorage.lastName = updates.lastName;
+    if (updates.phone !== undefined) updatesForStorage.phone = updates.phone;
+    if (updates.role !== undefined) updatesForStorage.role = updates.role;
+    if (updates.income !== undefined) updatesForStorage.income = updates.income;
+    if (updates.incomeType !== undefined) updatesForStorage.incomeType = updates.incomeType;
+    if (updates.preferredPropertyType !== undefined) {
+      updatesForStorage.preferredPropertyType = updates.preferredPropertyType;
+    }
     if (updates.name !== undefined) {
-      const [first, ...rest] = updates.name.split(' ');
-      payload.first_name = payload.first_name ?? first;
-      payload.last_name = payload.last_name ?? rest.join(' ');
+      updatesForStorage.name = updates.name;
+      if (!updates.firstName || !updates.lastName) {
+        const [first, ...rest] = updates.name.split(' ');
+        updatesForStorage.firstName = updatesForStorage.firstName ?? first;
+        updatesForStorage.lastName = updatesForStorage.lastName ?? rest.join(' ');
+      }
     }
 
-    if (Object.keys(payload).length === 0) return;
+    if (Object.keys(updatesForStorage).length === 0) return;
 
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .update(payload)
-        .eq('id', user.id)
-        .select('*')
-        .maybeSingle();
-
-      if (error) {
-        console.error('Failed to update profile', error);
-        throw error;
-      }
-
-      await supabase.auth.updateUser({
-        data: {
-          ...payload,
-          incomeType: updates.incomeType,
-          preferredPropertyType: updates.preferredPropertyType,
-        },
-      });
-
-      const session = await supabase.auth.getSession();
-      if (session.data.session?.user) {
-        const refreshed = mapProfile(session.data.session.user, data || undefined);
-        setUser(refreshed);
-      }
-    } catch (error) {
-      handlePossibleNetworkError(error, 'updating your profile');
-      throw error;
+    const updatedRecord = updateStoredUser(user.id, updatesForStorage);
+    if (!updatedRecord) {
+      throw new Error('Failed to update profile');
     }
+
+    setUser(mapStoredUserToProfile(updatedRecord));
   };
 
   const updateUserProfile = async (updates: Partial<UserProfile>) => {
@@ -333,35 +195,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
     </UserContext.Provider>
   );
 }
-
-const isNetworkError = (error: unknown) => {
-  if (!error || typeof error !== 'object') return false;
-  const message = 'message' in error && typeof (error as { message?: string }).message === 'string'
-    ? (error as { message: string }).message.toLowerCase()
-    : '';
-  return message.includes('fetch failed') || message.includes('failed to fetch') || message.includes('network request failed');
-};
-
-const isIgnorableProfileError = (error: PostgrestError | null) => {
-  if (!error) return false;
-  const message = (error.message || '').toLowerCase();
-  return (
-    error.code === '42P01' ||
-    error.code === 'PGRST301' ||
-    error.code === 'PGRST302' ||
-    message.includes('does not exist')
-  );
-};
-
-const handlePossibleNetworkError = (error: unknown, action: string) => {
-  if (!error) return;
-  if (isNetworkError(error)) {
-    throw new Error(
-      `Unable to reach Supabase while ${action}. ` +
-        'Confirm that VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set correctly in your .env file and that the Supabase project allows requests from this origin.'
-    );
-  }
-};
 
 export function useUser() {
   const context = useContext(UserContext);
